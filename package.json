@@ -25,8 +25,10 @@
     "productName": "CodePad",
     "asar": false,
     "afterPack": "scripts/afterPack.js",
+    "icon": "assets/icon.png",
     "files": [
       "main.js",
+      "assets/icon.png",
       "preload.js",
       "fileAccess.js",
       "renderer/**",

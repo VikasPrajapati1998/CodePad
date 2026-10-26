@@ -8,6 +8,8 @@ CodePad/
 ├── main.js             # Electron main process: window, native menu, dialogs, sender-checked IPC, navigation/permission lockdown, close flow
 ├── fileAccess.js       # Main-side file layer: path allow-list (user-approved files/root), UNC/symlink checks, encodings, atomic writes
 ├── preload.js          # contextBridge API (window.codepad) exposed to the sandboxed renderer
+├── assets/
+│   └── icon.png        # App icon (1024x1024); used for the window icon and as the electron-builder source for .ico/.icns/Linux icons
 ├── scripts/
 │   └── afterPack.js    # electron-builder hook: flips Electron fuses (RunAsNode, NODE_OPTIONS, --inspect off)
 ├── renderer/
