@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; worker-src blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';">
+  <title>CodePad</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div id="sidebar-header">
+        <span id="folder-name">No folder open</span>
+      </div>
+      <div id="file-tree"></div>
+    </aside>
+    <main id="main">
+      <div id="tabs"></div>
+      <div id="editor"></div>
+      <div id="welcome">
+        <h1>CodePad</h1>
+        <p>Open a file or folder, or drop files here.</p>
+        <ul>
+          <li><kbd>Ctrl+N</kbd> New file</li>
+          <li><kbd>Ctrl+O</kbd> Open file</li>
+          <li><kbd>Ctrl+Shift+O</kbd> Open folder</li>
+          <li><kbd>Ctrl+Shift+P</kbd> Command palette</li>
+          <li><kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd> Find / replace</li>
+        </ul>
+      </div>
+      <footer id="statusbar">
+        <span id="status-message"></span>
+        <span class="spacer"></span>
+        <span id="status-pos">Ln 1, Col 1</span>
+        <button id="status-eol" title="Change line endings">LF</button>
+        <span id="status-encoding"></span>
+        <select id="status-lang" title="Change language mode"></select>
+      </footer>
+    </main>
+  </div>
+  <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

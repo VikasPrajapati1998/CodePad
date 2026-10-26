@@ -1,0 +1,52 @@
+{
+  "name": "codepad",
+  "productName": "CodePad",
+  "version": "1.0.0",
+  "description": "A fast, lightweight code and text editor for all kinds of files.",
+  "author": "CodePad",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win -c.directories.output=installers/Windows",
+    "dist:mac": "electron-builder --mac --x64 --arm64 -c.directories.output=installers/MacOS",
+    "dist:linux": "electron-builder --linux -c.directories.output=installers/Linux"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "monaco-editor": "0.52.2"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.codepad.editor",
+    "productName": "CodePad",
+    "asar": false,
+    "afterPack": "scripts/afterPack.js",
+    "files": [
+      "main.js",
+      "preload.js",
+      "fileAccess.js",
+      "renderer/**",
+      "node_modules/monaco-editor/min/**"
+    ],
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Development"
+    }
+  }
+}

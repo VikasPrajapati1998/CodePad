@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output (installers are shared via GitHub Releases / CI artifacts)
+dist/
+installers/
+
+# Secrets and signing certificates
+.env
+.env.*
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Claude scratch space
+.claude/temp/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
