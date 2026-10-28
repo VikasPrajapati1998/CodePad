@@ -1,0 +1,48 @@
+CodePad third-party notices (AI features)
+
+CodePad's own code is MIT licensed (see LICENSE). The AI features use the components below.
+The licenses of the other bundled libraries (Monaco Editor, pdf.js, pdf-lib, mammoth, docx, SheetJS,
+iconv-lite) are shipped next to those libraries.
+
+AI model: Qwen3-0.6B
+  Copyright (c) Alibaba Cloud, Qwen team. Apache License 2.0.
+  https://www.apache.org/licenses/LICENSE-2.0
+  The model file is NOT part of the CodePad installers. It is downloaded once, during installation or on
+  first use of the AI features, from registry.ollama.ai (Hugging Face Qwen/Qwen3-0.6B-GGUF as a backup),
+  and is checked against a fixed SHA-256 fingerprint. CodePad does not modify it.
+
+Spell checking word list: dictionaries/en.txt, the American-English SCOWL word list (levels up to 70,
+  expanded word forms), taken from the npm package wordlist-english 1.2.1. Copyright 2000-2016 Kevin Atkinson
+  and the other contributors named in dictionaries/LICENSE-SCOWL.txt (permissive licence, shipped next to the
+  list). The checker is CodePad's own code and runs offline in the main process; no text leaves the computer.
+
+Inference engine: node-llama-cpp 3.22.1
+  Copyright (c) 2023 Gilad S. MIT License.
+  https://github.com/withcatai/node-llama-cpp
+
+Inference library: llama.cpp / ggml (prebuilt binaries shipped in the @node-llama-cpp/* package for the
+  installed platform)
+  Copyright (c) the ggml authors. MIT License.
+  https://github.com/ggml-org/llama.cpp
+
+Packages node-llama-cpp depends on (installed from npm, shipped unmodified), by license:
+
+  MIT: @huggingface/jinja, @kwsites/file-exists, @kwsites/promise-deferred, @simple-git/args-pathspec,
+  @simple-git/argv-parser, @tinyhttp/content-disposition, ansi-escapes, ansi-regex, ansi-styles, async-retry,
+  bytes, chalk, chmodrp, ci-info, cli-cursor, cli-spinners, cmake-js, color-convert, color-name, commander,
+  cross-spawn, debug, deep-extend, emoji-regex, env-var, escalade, eventemitter3, filename-reserved-regex,
+  filenamify, fs-extra, get-east-asian-width, ignore, ipull, is-fullwidth-code-point, is-interactive,
+  is-unicode-supported, jsonfile, lifecycle-utils, lodash.debounce, log-symbols, lowdb, mimic-function,
+  minimist, minizlib, ms, nanoid, node-addon-api, node-api-headers, onetime, ora, parse-ms, path-key,
+  pretty-bytes, pretty-ms, proper-lockfile, require-directory, restore-cursor, retry, shebang-command,
+  shebang-regex, simple-git, sleep-promise, slice-ansi, stdin-discarder, stdout-update, steno, string-width,
+  strip-ansi, strip-json-comments, universalify, url-join, wrap-ansi, yargs, yoctocolors
+
+  ISC: @isaacs/fs-minipass, cliui, get-caller-file, graceful-fs, ini, isexe, semver, signal-exit,
+  validate-npm-package-name, which, y18n, yargs-parser
+
+  BlueOak-1.0.0: chownr, isexe, minipass, tar, yallist
+
+  BSD-2-Clause OR MIT OR Apache-2.0: rc
+
+Full license texts are included with each package in node_modules.

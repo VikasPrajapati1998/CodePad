@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -22,6 +25,9 @@ jobs:
             name: linux
             script: dist:linux
     runs-on: ${{ matrix.os }}
+    env:
+      # node-llama-cpp's postinstall must not build or download anything.
+      NODE_LLAMA_CPP_SKIP_DOWNLOAD: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +37,11 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # The macOS runner is arm64, so npm ci skips the Intel engine package (cpu: x64 only). The Intel build needs it.
+      - name: Install the Intel macOS AI engine package
+        if: matrix.name == 'macos'
+        run: npm install --no-save --ignore-scripts --os=darwin --cpu=x64 @node-llama-cpp/mac-x64@3.22.1
 
       - run: npm run ${{ matrix.script }} -- --publish never
 
@@ -51,11 +62,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Write SHA256SUMS
+        working-directory: artifacts
+        run: |
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/*
 
       - uses: softprops/action-gh-release@v2
         with:

@@ -1,0 +1,85 @@
+/* Workbench variables for the extra themes registered by themes.js. */
+:root[data-theme='monokai'] {
+  --bg: #272822;
+  --bg-side: #21221d;
+  --bg-tab: #1e1f1c;
+  --bg-tab-active: #272822;
+  --bg-hover: #3e3d32;
+  --fg: #f8f8f2;
+  --fg-dim: #90908a;
+  --accent: #a6e22e;
+  --border: #3a3b34;
+  --status-bg: #75715e;
+  --status-fg: #f8f8f2;
+}
+
+:root[data-theme='solarized-dark'] {
+  --bg: #002b36;
+  --bg-side: #00252f;
+  --bg-tab: #073642;
+  --bg-tab-active: #002b36;
+  --bg-hover: #0a3d4a;
+  --fg: #93a1a1;
+  --fg-dim: #586e75;
+  --accent: #268bd2;
+  --border: #0d4655;
+  --status-bg: #268bd2;
+  --status-fg: #fdf6e3;
+}
+
+:root[data-theme='solarized-light'] {
+  color-scheme: light;
+  --bg: #fdf6e3;
+  --bg-side: #eee8d5;
+  --bg-tab: #e6dfc8;
+  --bg-tab-active: #fdf6e3;
+  --bg-hover: #e4ddc4;
+  --fg: #586e75;
+  --fg-dim: #93a1a1;
+  --accent: #268bd2;
+  --border: #d6cfb7;
+  --status-bg: #268bd2;
+  --status-fg: #fdf6e3;
+}
+
+:root[data-theme='zenburn'] {
+  --bg: #3f3f3f;
+  --bg-side: #383838;
+  --bg-tab: #333333;
+  --bg-tab-active: #3f3f3f;
+  --bg-hover: #4a4a4a;
+  --fg: #dcdccc;
+  --fg-dim: #9f9f8f;
+  --accent: #8cd0d3;
+  --border: #505050;
+  --status-bg: #5f7f5f;
+  --status-fg: #f0efd0;
+}
+
+:root[data-theme='obsidian'] {
+  --bg: #293134;
+  --bg-side: #232a2d;
+  --bg-tab: #1f2527;
+  --bg-tab-active: #293134;
+  --bg-hover: #364145;
+  --fg: #e0e2e4;
+  --fg-dim: #8a979c;
+  --accent: #678cb1;
+  --border: #3b474b;
+  --status-bg: #4c6a85;
+  --status-fg: #ffffff;
+}
+
+:root[data-theme='hc-black'] {
+  --bg: #000000;
+  --bg-side: #000000;
+  --bg-tab: #000000;
+  --bg-tab-active: #1a1a1a;
+  --bg-hover: #1f1f1f;
+  --fg: #ffffff;
+  --fg-dim: #cfcfcf;
+  --accent: #1aebff;
+  --border: #6fc3df;
+  --status-bg: #000000;
+  --status-fg: #ffffff;
+}

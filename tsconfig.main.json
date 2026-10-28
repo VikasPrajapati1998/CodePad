@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "node16",
+    "moduleResolution": "node16",
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node"
+    ],
+    "moduleDetection": "auto"
+  },
+  "include": [
+    "src/*.ts",
+    "src/providers/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/scripts/**/*.ts",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/renderer"
+  ]
+}

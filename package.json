@@ -1,54 +1,228 @@
 {
   "name": "codepad",
   "productName": "CodePad",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "A fast, lightweight code and text editor for all kinds of files.",
   "author": "CodePad",
-  "main": "main.js",
+  "main": "dist/main.js",
   "scripts": {
-    "start": "electron .",
-    "dist:win": "electron-builder --win -c.directories.output=installers/Windows",
-    "dist:mac": "electron-builder --mac --x64 --arm64 -c.directories.output=installers/MacOS",
-    "dist:linux": "electron-builder --linux -c.directories.output=installers/Linux"
+    "build": "node scripts/build.mts",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.scripts.json",
+    "start": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win -c.directories.output=installers/Windows",
+    "dist:mac": "npm run build && electron-builder --mac --x64 --arm64 -c.directories.output=installers/MacOS",
+    "dist:linux": "npm run build && electron-builder --linux -c.directories.output=installers/Linux"
   },
   "license": "MIT",
   "dependencies": {
-    "monaco-editor": "0.52.2"
+    "@cantoo/pdf-lib": "2.11.1",
+    "@pdf-lib/fontkit": "1.1.1",
+    "docx": "9.14.0",
+    "iconv-lite": "0.7.3",
+    "mammoth": "1.13.0",
+    "monaco-editor": "0.52.2",
+    "node-llama-cpp": "3.22.1",
+    "pdfjs-dist": "6.4.299",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@electron/fuses": "2.1.3",
+    "@types/node": "24.19.2",
     "electron": "44.9.3",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "typescript": "5.9.3"
   },
   "build": {
     "appId": "com.codepad.editor",
     "productName": "CodePad",
     "asar": false,
-    "afterPack": "scripts/afterPack.js",
+    "afterPack": "dist/scripts/afterPack.js",
     "icon": "assets/icon.png",
     "files": [
-      "main.js",
-      "assets/icon.png",
-      "preload.js",
-      "fileAccess.js",
-      "renderer/**",
-      "node_modules/monaco-editor/min/**"
+      "dist/**",
+      "!dist/scripts/**",
+      "NOTICE",
+      "node_modules/monaco-editor/min/**",
+      "node_modules/iconv-lite/**",
+      "node_modules/safer-buffer/**",
+      "node_modules/pdfjs-dist/build/pdf.min.mjs",
+      "node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+      "node_modules/pdfjs-dist/cmaps/**",
+      "node_modules/pdfjs-dist/standard_fonts/**",
+      "node_modules/pdfjs-dist/iccs/**",
+      "node_modules/pdfjs-dist/wasm/jbig2.wasm",
+      "node_modules/pdfjs-dist/wasm/jbig2_nowasm_fallback.js",
+      "node_modules/pdfjs-dist/wasm/openjpeg.wasm",
+      "node_modules/pdfjs-dist/wasm/openjpeg_nowasm_fallback.js",
+      "node_modules/pdfjs-dist/wasm/qcms_bg.wasm",
+      "node_modules/pdfjs-dist/wasm/LICENSE*",
+      "node_modules/pdfjs-dist/LICENSE",
+      "node_modules/@cantoo/pdf-lib/dist/pdf-lib.min.js",
+      "node_modules/@cantoo/pdf-lib/LICENSE.md",
+      "node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js",
+      "node_modules/mammoth/mammoth.browser.min.js",
+      "node_modules/mammoth/LICENSE",
+      "node_modules/docx/dist/index.iife.js",
+      "node_modules/docx/LICENSE",
+      "node_modules/xlsx/dist/xlsx.full.min.js",
+      "node_modules/xlsx/dist/LICENSE",
+      "node_modules/xlsx/LICENSE",
+      "node_modules/node-llama-cpp/package.json",
+      "node_modules/node-llama-cpp/LICENSE",
+      "node_modules/node-llama-cpp/dist/**",
+      "node_modules/node-llama-cpp/llama/*.json",
+      "node_modules/node-llama-cpp/node_modules/**",
+      "!node_modules/node-llama-cpp/**/*.map",
+      "!node_modules/node-llama-cpp/**/*.d.ts",
+      "!node_modules/node-llama-cpp/llama/gitRelease.bundle",
+      "node_modules/@huggingface/jinja/**",
+      "node_modules/@isaacs/fs-minipass/**",
+      "node_modules/@kwsites/file-exists/**",
+      "node_modules/@kwsites/promise-deferred/**",
+      "node_modules/@simple-git/args-pathspec/**",
+      "node_modules/@simple-git/argv-parser/**",
+      "node_modules/@tinyhttp/content-disposition/**",
+      "node_modules/ansi-escapes/**",
+      "node_modules/ansi-regex/**",
+      "node_modules/ansi-styles/**",
+      "node_modules/async-retry/**",
+      "node_modules/bytes/**",
+      "node_modules/chmodrp/**",
+      "node_modules/chownr/**",
+      "node_modules/ci-info/**",
+      "node_modules/cli-cursor/**",
+      "node_modules/cli-spinners/**",
+      "node_modules/cliui/**",
+      "node_modules/cmake-js/**",
+      "node_modules/color-convert/**",
+      "node_modules/color-name/**",
+      "node_modules/cross-spawn/**",
+      "node_modules/debug/**",
+      "node_modules/deep-extend/**",
+      "node_modules/emoji-regex/**",
+      "node_modules/env-var/**",
+      "node_modules/escalade/**",
+      "node_modules/eventemitter3/**",
+      "node_modules/filename-reserved-regex/**",
+      "node_modules/filenamify/**",
+      "node_modules/get-caller-file/**",
+      "node_modules/get-east-asian-width/**",
+      "node_modules/graceful-fs/**",
+      "node_modules/ignore/**",
+      "node_modules/ini/**",
+      "node_modules/ipull/**",
+      "node_modules/is-fullwidth-code-point/**",
+      "node_modules/is-interactive/**",
+      "node_modules/is-unicode-supported/**",
+      "node_modules/jsonfile/**",
+      "node_modules/lifecycle-utils/**",
+      "node_modules/lodash.debounce/**",
+      "node_modules/log-symbols/**",
+      "node_modules/lowdb/**",
+      "node_modules/mimic-function/**",
+      "node_modules/minimist/**",
+      "node_modules/minipass/**",
+      "node_modules/minizlib/**",
+      "node_modules/ms/**",
+      "node_modules/node-addon-api/**",
+      "node_modules/node-api-headers/**",
+      "node_modules/onetime/**",
+      "node_modules/ora/**",
+      "node_modules/parse-ms/**",
+      "node_modules/path-key/**",
+      "node_modules/pretty-bytes/**",
+      "node_modules/pretty-ms/**",
+      "node_modules/proper-lockfile/**",
+      "node_modules/rc/**",
+      "node_modules/require-directory/**",
+      "node_modules/restore-cursor/**",
+      "node_modules/retry/**",
+      "node_modules/semver/**",
+      "node_modules/shebang-command/**",
+      "node_modules/shebang-regex/**",
+      "node_modules/signal-exit/**",
+      "node_modules/simple-git/**",
+      "node_modules/sleep-promise/**",
+      "node_modules/slice-ansi/**",
+      "node_modules/stdin-discarder/**",
+      "node_modules/stdout-update/**",
+      "node_modules/steno/**",
+      "node_modules/string-width/**",
+      "node_modules/strip-ansi/**",
+      "node_modules/strip-json-comments/**",
+      "node_modules/tar/**",
+      "node_modules/universalify/**",
+      "node_modules/url-join/**",
+      "node_modules/validate-npm-package-name/**",
+      "node_modules/wrap-ansi/**",
+      "node_modules/y18n/**",
+      "node_modules/yargs/**",
+      "node_modules/yargs-parser/**",
+      "node_modules/yoctocolors/**"
     ],
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "files": [
+        "node_modules/@node-llama-cpp/win-${arch}/**",
+        "!node_modules/@node-llama-cpp/**/*.lib"
+      ],
+      "signExts": [
+        ".dll",
+        ".node"
+      ]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "allowElevation": false,
+      "include": "build/installer.nsh"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.developer-tools",
-      "hardenedRuntime": true
+      "hardenedRuntime": true,
+      "files": [
+        "node_modules/@node-llama-cpp/mac-${arch}*/**"
+      ],
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
-      "category": "Development"
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "files": [
+        "node_modules/@node-llama-cpp/linux-${arch}/**"
+      ]
+    },
+    "npmRebuild": false,
+    "deb": {
+      "fpm": [
+        "--before-install",
+        "build/linux/deb-preinst.sh"
+      ]
+    }
+  },
+  "overrides": {
+    "@node-llama-cpp/win-x64-cuda": "file:vendor/nlc-stub",
+    "@node-llama-cpp/win-x64-cuda-ext": "file:vendor/nlc-stub",
+    "@node-llama-cpp/win-x64-vulkan": "file:vendor/nlc-stub",
+    "@node-llama-cpp/win-arm64": "file:vendor/nlc-stub",
+    "@node-llama-cpp/linux-x64-cuda": "file:vendor/nlc-stub",
+    "@node-llama-cpp/linux-x64-cuda-ext": "file:vendor/nlc-stub",
+    "@node-llama-cpp/linux-x64-vulkan": "file:vendor/nlc-stub",
+    "@node-llama-cpp/linux-armv7l": "file:vendor/nlc-stub",
+    "@node-llama-cpp/linux-riscv64": "file:vendor/nlc-stub",
+    "node-llama-cpp": {
+      "simple-git": "4.0.2"
     }
   }
 }

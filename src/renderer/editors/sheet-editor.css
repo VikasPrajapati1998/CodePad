@@ -1,0 +1,274 @@
+/* Spreadsheet editor. All selectors are scoped under .cp-sheet and use only the app theme variables. */
+
+.cp-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px 'Segoe UI', system-ui, sans-serif;
+  --cp-sheet-grid: color-mix(in srgb, var(--border) 70%, transparent);
+  --cp-sheet-sel: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.cp-sheet [hidden] { display: none !important; }
+
+.cp-sheet button,
+.cp-sheet input,
+.cp-sheet textarea { font: inherit; color: inherit; }
+
+/* Formula bar */
+.cp-sheet-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.cp-sheet-name {
+  width: 92px;
+  padding: 2px 6px;
+  text-align: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.cp-sheet-fx { color: var(--fg-dim); font-style: italic; padding: 0 2px; }
+
+.cp-sheet-formula {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.cp-sheet-name:focus,
+.cp-sheet-formula:focus,
+.cp-sheet-find-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+/* Find bar */
+.cp-sheet-findbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--bg-side);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.cp-sheet-find-input {
+  width: 220px;
+  padding: 2px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.cp-sheet-find-case { display: flex; align-items: center; gap: 4px; color: var(--fg-dim); }
+.cp-sheet-find-msg { color: var(--fg-dim); }
+
+.cp-sheet-btn {
+  padding: 2px 8px;
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.cp-sheet-btn:hover { background: var(--bg-hover); }
+
+/* Grid */
+.cp-sheet-scroller {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.cp-sheet-frame {
+  position: sticky;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.cp-sheet-sizer { pointer-events: none; }
+
+.cp-sheet-corner,
+.cp-sheet-colhdr,
+.cp-sheet-rowhdr,
+.cp-sheet-cells { position: absolute; overflow: hidden; }
+
+.cp-sheet-corner {
+  left: 0;
+  top: 0;
+  background: var(--bg-side);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-sheet-colhdr { top: 0; background: var(--bg-side); border-bottom: 1px solid var(--border); }
+.cp-sheet-rowhdr { left: 0; background: var(--bg-side); border-right: 1px solid var(--border); }
+
+.cp-sheet-hdr {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--fg-dim);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.cp-sheet-hdr.sel { background: var(--bg-hover); color: var(--fg); }
+.cp-sheet-hdr.full { background: var(--accent); color: #fff; }
+
+.cp-sheet-cells {
+  background-color: var(--bg);
+  background-image: linear-gradient(to bottom, transparent calc(100% - 1px), var(--cp-sheet-grid) 0);
+  background-size: 100% 22px;
+  cursor: cell;
+}
+
+.cp-sheet-vline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--cp-sheet-grid);
+}
+
+.cp-sheet-cell {
+  position: absolute;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: clip;
+  padding: 0 4px;
+  line-height: 21px;
+  box-sizing: border-box;
+}
+
+.cp-sheet-cell.num { text-align: right; }
+.cp-sheet-cell.ctr { text-align: center; }
+.cp-sheet-cell.formula { color: var(--fg); }
+.cp-sheet-cell.merged { background: var(--bg); border-right: 1px solid var(--cp-sheet-grid); border-bottom: 1px solid var(--cp-sheet-grid); }
+
+.cp-sheet-selbox {
+  position: absolute;
+  pointer-events: none;
+  background: var(--cp-sheet-sel);
+  border: 1px solid var(--accent);
+  box-sizing: border-box;
+}
+
+.cp-sheet-active {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
+}
+
+.cp-sheet-editor {
+  position: absolute;
+  z-index: 3;
+  margin: 0;
+  padding: 0 4px;
+  line-height: 21px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  background: var(--bg);
+  user-select: text;
+  border: 2px solid var(--accent);
+  border-radius: 0;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Sheet tabs */
+.cp-sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  background: var(--bg-side);
+  border-top: 1px solid var(--border);
+}
+
+.cp-sheet-tab {
+  padding: 4px 14px;
+  white-space: nowrap;
+  background: var(--bg-tab);
+  border: 0;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.cp-sheet-tab:hover { background: var(--bg-hover); }
+.cp-sheet-tab.active { background: var(--bg-tab-active); border-top: 2px solid var(--accent); padding-top: 2px; font-weight: 600; }
+.cp-sheet-tab-add { padding: 4px 12px; font-weight: 600; }
+
+.cp-sheet-tab-input {
+  width: 120px;
+  margin: 2px 4px;
+  padding: 1px 4px;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+}
+
+/* Context menu and confirm dialog */
+.cp-sheet-menu {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px 0;
+  background: var(--bg-side);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.cp-sheet-menu-item {
+  padding: 4px 16px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.cp-sheet-menu-item:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.cp-sheet-menu-item:disabled { color: var(--fg-dim); cursor: default; }
+.cp-sheet-menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
+
+.cp-sheet-dialog {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.cp-sheet-dialog-box {
+  max-width: 420px;
+  padding: 16px;
+  background: var(--bg-side);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+.cp-sheet-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

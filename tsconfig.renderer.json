@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "none",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [],
+    "resolveJsonModule": false
+  },
+  "include": [
+    "src/renderer/**/*.ts",
+    "src/types/**/*.d.ts"
+  ]
+}

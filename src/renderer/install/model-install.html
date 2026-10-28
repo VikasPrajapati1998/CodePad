@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';">
+  <title>CodePad</title>
+  <link rel="stylesheet" href="model-install.css">
+</head>
+<body>
+  <main>
+    <h1 id="title">Downloading the CodePad AI model...</h1>
+    <progress id="bar" max="100" value="0"></progress>
+    <p id="detail">Starting...</p>
+    <p class="note">This is a one-time download. CodePad's AI then works offline.</p>
+    <div class="actions">
+      <button id="cancel" type="button">Cancel</button>
+    </div>
+  </main>
+  <script src="model-install.js"></script>
+</body>
+</html>

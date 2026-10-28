@@ -1,0 +1,169 @@
+.cp-docx {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-side);
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.cp-docx [hidden] { display: none !important; }
+
+.cp-docx-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--bg-tab);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.cp-docx-banner-text { flex: 1; }
+
+.cp-docx-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-tab);
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-docx-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+.cp-docx-btn:hover { background: var(--bg-hover); border-color: var(--border); }
+.cp-docx-btn.active { background: var(--accent); color: #fff; }
+.cp-docx-bold { font-weight: 700; }
+.cp-docx-italic { font-style: italic; }
+.cp-docx-underline { text-decoration: underline; }
+.cp-docx-strike { text-decoration: line-through; }
+
+.cp-docx-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.cp-docx-label { color: var(--fg-dim); margin-right: 4px; }
+
+.cp-docx-select,
+.cp-docx-find,
+.cp-docx-field input {
+  height: 26px;
+  padding: 0 6px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: inherit;
+}
+.cp-docx-size { width: 64px; }
+.cp-docx-find { width: 240px; }
+.cp-docx-color {
+  width: 30px;
+  height: 26px;
+  padding: 1px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cp-docx-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 16px;
+  background: var(--bg-side);
+}
+
+.cp-docx-page {
+  box-sizing: border-box;
+  max-width: 816px;
+  min-height: 1056px;
+  margin: 0 auto;
+  padding: 72px 96px;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  font-family: Calibri, Carlito, 'Segoe UI', Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.35;
+  outline: none;
+  overflow-wrap: break-word;
+  caret-color: #000000;
+}
+@media (max-width: 900px) {
+  .cp-docx-page { padding: 32px; min-height: 0; }
+}
+
+.cp-docx-page p { margin: 0 0 8px; }
+.cp-docx-page h1, .cp-docx-page h2, .cp-docx-page h3,
+.cp-docx-page h4, .cp-docx-page h5, .cp-docx-page h6 { margin: 14px 0 6px; line-height: 1.2; }
+.cp-docx-page h1 { font-size: 20pt; }
+.cp-docx-page h2 { font-size: 16pt; }
+.cp-docx-page h3 { font-size: 14pt; }
+.cp-docx-page h4 { font-size: 12pt; }
+.cp-docx-page h5 { font-size: 11pt; }
+.cp-docx-page h6 { font-size: 10pt; }
+.cp-docx-page ul, .cp-docx-page ol { margin: 0 0 8px; padding-left: 40px; }
+.cp-docx-page blockquote { margin: 0 0 8px 40px; padding: 0; border: 0; }
+.cp-docx-page pre, .cp-docx-page code { font-family: Consolas, 'Courier New', monospace; }
+.cp-docx-page pre { margin: 0 0 8px; white-space: pre-wrap; }
+.cp-docx-page a { color: #0563c1; text-decoration: underline; cursor: text; }
+.cp-docx-page img { max-width: 100%; height: auto; }
+.cp-docx-page table { border-collapse: collapse; width: 100%; margin: 0 0 8px; table-layout: fixed; }
+.cp-docx-page td, .cp-docx-page th {
+  border: 1px solid #999999;
+  padding: 4px 6px;
+  vertical-align: top;
+  min-width: 20px;
+}
+.cp-docx-page th { font-weight: 700; }
+
+.cp-docx-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  background: rgba(0, 0, 0, 0.35);
+}
+.cp-docx-dialog {
+  min-width: 320px;
+  padding: 14px 16px;
+  background: var(--bg-side);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.cp-docx-dialog-title { margin: 0 0 10px; font-size: 14px; font-weight: 600; }
+.cp-docx-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 10px; }
+.cp-docx-field span { color: var(--fg-dim); font-size: 12px; }
+.cp-docx-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.cp-docx-dialog-btn {
+  height: 26px;
+  padding: 0 12px;
+  background: var(--bg-tab);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+.cp-docx-dialog-btn:hover { background: var(--bg-hover); }
+.cp-docx-dialog-btn.cp-docx-primary { background: var(--accent); border-color: var(--accent); color: #fff; }

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; img-src 'self' data:; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';">
+  <title>CodePad</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="core/core.css">
+  <link rel="stylesheet" href="editors/docx-editor.css">
+  <link rel="stylesheet" href="editors/sheet-editor.css">
+  <link rel="stylesheet" href="editors/pdf-editor.css">
+  <link rel="stylesheet" href="features/search.css">
+  <link rel="stylesheet" href="features/text-tools.css">
+  <link rel="stylesheet" href="features/view.css">
+  <link rel="stylesheet" href="features/themes.css">
+  <link rel="stylesheet" href="features/tabs.css">
+  <link rel="stylesheet" href="features/compare.css">
+  <link rel="stylesheet" href="features/ai.css">
+  <link rel="stylesheet" href="features/ai-chat.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div id="sidebar-tabs" role="tablist"></div>
+      <div id="sidebar-body">
+        <div id="panel-explorer">
+          <div id="sidebar-header">
+            <span id="folder-name">No folder open</span>
+          </div>
+          <div id="file-tree"></div>
+        </div>
+      </div>
+    </aside>
+    <div id="sidebar-resizer"></div>
+    <main id="main">
+      <div id="tabs"></div>
+      <div id="editor"></div>
+      <div id="views" class="hidden"></div>
+      <div id="welcome">
+        <h1>CodePad</h1>
+        <p>Open a file or folder, or drop files here.</p>
+        <ul>
+          <li><kbd>Ctrl+N</kbd> New file</li>
+          <li><kbd>Ctrl+O</kbd> Open file</li>
+          <li><kbd>Ctrl+Shift+O</kbd> Open folder</li>
+          <li><kbd>Ctrl+Shift+P</kbd> Command palette</li>
+          <li><kbd>Ctrl+F</kbd> / <kbd>Ctrl+H</kbd> Find / replace</li>
+          <li><kbd>Ctrl+Shift+F</kbd> Find in files</li>
+        </ul>
+      </div>
+      <div id="bottom-panel" class="hidden">
+        <div id="bottom-resizer"></div>
+        <div id="bottom-header">
+          <div id="bottom-tabs" role="tablist"></div>
+          <button id="bottom-close" type="button" title="Close panel">&times;</button>
+        </div>
+        <div id="bottom-body"></div>
+      </div>
+      <footer id="statusbar">
+        <span id="status-message"></span>
+        <span class="spacer"></span>
+        <span id="status-info"></span>
+        <span id="status-pos">Ln 1, Col 1</span>
+        <button id="status-eol" type="button" title="Change line endings">LF</button>
+        <button id="status-encoding" type="button" title="Change encoding"></button>
+        <select id="status-lang" title="Change language mode"></select>
+      </footer>
+    </main>
+  </div>
+  <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="../shared/settingsSchema.js"></script>
+  <script src="../shared/searchCore.js"></script>
+  <script src="../shared/suggestText.js"></script>
+  <script src="../shared/chatIntent.js"></script>
+  <script src="core/bus.js"></script>
+  <script src="core/commands.js"></script>
+  <script src="core/settings.js"></script>
+  <script src="core/themes.js"></script>
+  <script src="core/ui.js"></script>
+  <script src="core/panels.js"></script>
+  <script src="core/features.js"></script>
+  <script src="editors/common.js"></script>
+  <script src="editors/docx-editor.js"></script>
+  <script src="editors/sheet-editor.js"></script>
+  <script src="editors/pdf-editor.js"></script>
+  <script src="features/search.js"></script>
+  <script src="features/search-results.js"></script>
+  <script src="features/bookmarks.js"></script>
+  <script src="features/text-tools.js"></script>
+  <script src="features/column-editor.js"></script>
+  <script src="features/clipboard-history.js"></script>
+  <script src="features/converters.js"></script>
+  <script src="features/hashes.js"></script>
+  <script src="features/view.js"></script>
+  <script src="features/encoding.js"></script>
+  <script src="features/themes.js"></script>
+  <script src="features/outline.js"></script>
+  <script src="features/spellcheck.js"></script>
+  <script src="features/settings-panel.js"></script>
+  <script src="features/tabs.js"></script>
+  <script src="features/files.js"></script>
+  <script src="features/sessions.js"></script>
+  <script src="features/compare.js"></script>
+  <script src="features/macros.js"></script>
+  <script src="features/ai-model.js"></script>
+  <script src="features/ai-models.js"></script>
+  <script src="features/autosuggest.js"></script>
+  <script src="features/ai-suggest.js"></script>
+  <script src="features/ai-summary.js"></script>
+  <script src="features/ai-rewrite.js"></script>
+  <script src="features/ai-chat-tools.js"></script>
+  <script src="features/ai-chat.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

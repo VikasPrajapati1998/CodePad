@@ -4,6 +4,8 @@ node_modules/
 # Build output (installers are shared via GitHub Releases / CI artifacts)
 dist/
 installers/
+*.tsbuildinfo
+coverage/
 
 # Secrets and signing certificates
 .env
@@ -18,13 +20,23 @@ logs/
 *.log
 npm-debug.log*
 
-# Claude scratch space
+# Claude scratch space and personal local settings
 .claude/temp/
+.claude/memory/
+.claude/settings.local.json
 
 # OS and editor files
 .DS_Store
 Thumbs.db
 desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
 .idea/
 .vscode/
+.vs/
 *.swp
+*.tmp
+
+# AI model files (downloaded at install or first launch, never committed)
+*.gguf
+*.gguf.part

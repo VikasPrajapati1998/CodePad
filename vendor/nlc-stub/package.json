@@ -1,0 +1,5 @@
+{
+  "name": "nlc-stub",
+  "version": "1.0.0",
+  "description": "Empty stand-in for node-llama-cpp optional engine packages CodePad does not ship (GPU/other-arch builds)."
+}

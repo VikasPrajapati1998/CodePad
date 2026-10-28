@@ -1,0 +1,65 @@
+/* Column editor dialog */
+.cp-text-colform { display: flex; flex-direction: column; gap: 10px; min-width: 320px; }
+.cp-text-row { display: flex; gap: 16px; }
+.cp-text-group { display: flex; flex-direction: column; gap: 8px; }
+.cp-text-group[hidden] { display: none; }
+.cp-text-field { display: flex; align-items: center; gap: 8px; }
+.cp-text-field > span { min-width: 130px; }
+.cp-text-field > input[type='text'],
+.cp-text-field > select { flex: 1; min-width: 0; }
+.cp-text-message { min-height: 1.4em; color: var(--fg-dim); }
+.cp-text-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.cp-text-buttons button {
+  padding: 4px 14px;
+  background: var(--accent);
+  color: #ffffff;
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* Clipboard history and output panels */
+.cp-text-clip, .cp-text-output { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.cp-text-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.cp-text-output-title { flex: 1; color: var(--fg-dim); }
+.cp-text-iconbtn {
+  padding: 1px 8px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.cp-text-iconbtn:hover { background: var(--bg-hover); }
+.cp-text-cliplist { flex: 1; overflow: auto; }
+.cp-text-clipitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.cp-text-clipitem:hover { background: var(--bg-hover); }
+.cp-text-clipitem-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: Consolas, 'Courier New', monospace;
+}
+.cp-text-empty { padding: 10px 12px; color: var(--fg-dim); }
+.cp-text-output-body {
+  flex: 1;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  user-select: text;
+  font-family: Consolas, 'Courier New', monospace;
+}

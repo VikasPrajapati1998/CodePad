@@ -187,7 +187,44 @@ Opening an untrusted folder or archive extraction can include a symlink to a sen
 | 16 | Not fixed | Needs your signing certificates; setup is documented in SETUP.md, `hardenedRuntime` enabled for macOS |
 | 17 | Accepted | No security impact |
 
-## 6. Not covered
+### Offensive review round (CyberAttack.md / HackPath.md), code changes made, not yet run
+
+| ID | Status | How |
+|---|---|---|
+| F-01 | Fixed | `openExternalWithConsent` in `main.ts`: http/https/mailto only, length cap, rate limit, native "Open this link?" box |
+| F-02 | Fixed | `integrity.ts`: unwrapped key rejected when safeStorage is available, bad key renamed aside (never overwritten), signatures bound to a purpose, API keys sealed to their host |
+| F-03, F-17 | Fixed | `aiIpc.ts`: native dialogs naming the real host for add/update/setKey/setActive/consent; consent only while a job waits |
+| F-04 | Partly fixed | `ggufHeader.ts` structural validation plus a native warning before first load; no OS sandbox for the worker |
+| F-05, F-06, F-10, F-11 | Fixed | `fileAccess.ts`/`chatFiles.ts`: UNC links refused before `realpath`, allow-list before fs calls, fixed error codes, exclusive create/rename, dangerous names and locations blocked |
+| F-07, F-08, F-12, F-18, F-19 | Fixed (F-12 partly) | One-shot close latch, drop approval bound to a real drop event, second-instance confirm, sanitized menu labels, device/display/frame-navigation denied. Approvals are revoked on rename/trash but not on tab close |
+| F-09, F-15, F-16 | Fixed | `settings.json`, `macros.json`, `summary-cache.json` and `model.json` signed; local model paths validated; built-in model re-hashed once per run |
+| F-13, F-14 | Fixed (F-13 partly) | Private-range blocking for custom URLs (DNS not pinned, rebinding open); single Ollama pull, blob cleanup, per-digest lock |
+| F-NEW-03 | Fixed | CSP also sent as a response header, explicit `connect-src 'self'`; `style-src 'unsafe-inline'` and `worker-src` stay (Monaco) |
+| R-01 to R-06, F-NEW-02 | Fixed | Bounded content sniffing, zip pre-scan, restore crash-loop guard, CSV formula neutralizing, macro playback rules, regex shape check and caps, display-name sanitizer |
+| R-07 | Partly fixed | Binary sniff widened; XML recursion depth guard skipped |
+| P-01, P-02, P-03, P-05, P-07 | Partly fixed | Per-user NSIS install only, cookie-encryption fuse, `SHA256SUMS` + attestation, least-privilege workflow, non-fatal install probes |
+| P-04, P-06, P-08, P-09, P-10 | Open | See `SECURITY.md` follow-ups. Run `npm audit` |
+| F-NEW-01 | Mitigated | `asar:false` stays; per-user install keeps the tree user-private. Same-user write remains out of scope |
+
+## 6. Additional features (Notepad++-class update)
+
+Main owns trust for every new capability; none accepts a root path from the renderer.
+
+| Area | Control |
+|---|---|
+| fileAccess | Windows alternate data streams, reserved device names and trailing dot/space segments rejected; `isInside` fixed (`..foo` is a valid child); filesystem roots (and, for restored sessions, the home folder) refused as workspace; `approveFile` requires a regular file; reads go through a handle with a size cap (no stat/read race) |
+| Stores | `session.json`, named sessions and `recent.json` are HMAC-SHA256 signed (key in `userData/store.key`, wrapped by `safeStorage` when available). A failed check drops every path and the folder; only untitled text is restored. Files are written atomically with mode 0o600, size-capped; session ids are generated hex, never renderer-supplied |
+| IPC | Every new channel uses `handle()`; `recent:approveAt`, the Open Recent menu and command-line paths approve paths taken from main's own data; `shell:reveal` uses `showItemInFolder` only; `fs:hash` whitelists algorithms and streams regular files; settings, keybindings and macros are validated in main (schema, accelerator regex, step grammar) |
+| Find in Files | Root is always the approved folder; runs in a worker thread with result/size/time caps and a watchdog; symlinks and junctions are never followed |
+| File watching | Allow-listed paths only, at most 200 watchers, directory-level and debounced |
+| Encodings | Ids are whitelisted at every boundary; lossy writes are refused unless the user confirms; iconv-lite (pinned 0.7.3) runs only in main and the worker |
+| Renderer | Clipboard permissions are granted only to the app window; all dynamic strings use `textContent`; CSP unchanged |
+
+| Selectable summary models | Not run or reviewed dynamically. By design: API keys are encrypted with `safeStorage` (no plaintext fallback; without it keys cannot be saved, only `CODEPAD_<ID>_API_KEY` env vars work) and never returned to the renderer (only "set" + last 4 characters); `models.json` is HMAC-signed so a tampered base URL cannot redirect a stored key; remote calls only from main (`providers/*.js`): https (http only for loopback custom URLs), fixed hosts for Anthropic and Hugging Face, redirects rejected, 1 MB response cap, keys scrubbed from errors; one-time consent per remote model because document text leaves the machine; ghost-text suggestions never use remote models; local GGUF paths come only from a native dialog or from main's own download of an Ollama-registry blob (manifest digest verified), and user-chosen files are never deleted. Residual risk: the user's own provider is trusted with the text they choose to send; a custom OpenAI-compatible URL is user-supplied |
+
+Still to verify by running: native accelerator precedence over Monaco on Windows, Find in Files on a large repository, encoding round trips, and tampering with `session.json`/`recent.json`.
+
+## 7. Not covered
 - Third-party code inside `node_modules` (Monaco internals, Electron).
 - A dynamic test. No code was executed and no network capture was made.
 - `styles.css` was not reviewed (no security impact expected).

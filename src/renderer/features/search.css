@@ -1,0 +1,121 @@
+/* Search panel, Search Results panel, bookmarks and marks (A2). Uses the variables from styles.css. */
+
+:root {
+  --cp-mark-1: rgba(255, 213, 0, 0.45);
+  --cp-mark-2: rgba(0, 200, 83, 0.4);
+  --cp-mark-3: rgba(41, 182, 246, 0.45);
+  --cp-mark-4: rgba(255, 112, 67, 0.45);
+  --cp-mark-5: rgba(186, 104, 200, 0.45);
+  --cp-bookmark: #3794ff;
+  --cp-hit: rgba(234, 92, 0, 0.45);
+}
+
+:root[data-theme='light'] {
+  --cp-mark-1: rgba(255, 213, 0, 0.6);
+  --cp-mark-2: rgba(0, 200, 83, 0.45);
+  --cp-mark-3: rgba(41, 182, 246, 0.5);
+  --cp-mark-4: rgba(255, 112, 67, 0.5);
+  --cp-mark-5: rgba(186, 104, 200, 0.5);
+  --cp-hit: rgba(255, 170, 0, 0.55);
+}
+
+.cp-mark-1 { background: var(--cp-mark-1); }
+.cp-mark-2 { background: var(--cp-mark-2); }
+.cp-mark-3 { background: var(--cp-mark-3); }
+.cp-mark-4 { background: var(--cp-mark-4); }
+.cp-mark-5 { background: var(--cp-mark-5); }
+
+.cp-bookmark::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 4px 0 0 4px;
+  border-radius: 2px;
+  background: var(--cp-bookmark);
+}
+
+/* ---- search panel ---- */
+
+.cp-search { padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.cp-search-field { display: flex; flex-direction: column; gap: 2px; }
+.cp-search-label { color: var(--fg-dim); font-size: 11px; }
+.cp-search-folder { display: flex; flex-direction: column; gap: 6px; }
+.cp-search-folder[hidden] { display: none; }
+
+.cp-search-input {
+  width: 100%;
+  padding: 3px 6px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: inherit;
+}
+.cp-search-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+.cp-search-flags, .cp-search-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.cp-search-flag, .cp-search-btn, .cp-results-btn {
+  padding: 2px 8px;
+  color: var(--fg);
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+.cp-search-flag { min-width: 28px; padding: 2px 6px; }
+.cp-search-flag[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.cp-search-flag:hover, .cp-search-btn:hover, .cp-results-btn:hover { background: var(--bg-hover); }
+.cp-search-btn:disabled { opacity: 0.5; cursor: default; }
+.cp-search-btn[hidden] { display: none; }
+.cp-search-check { display: flex; align-items: center; color: var(--fg-dim); }
+
+/* ---- search results panel ---- */
+
+.cp-results { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cp-results-toolbar { display: flex; align-items: stretch; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.cp-results-strip { display: flex; overflow-x: auto; min-width: 0; }
+.cp-results-actions { display: flex; align-items: center; gap: 4px; padding: 2px 6px; }
+
+.cp-results-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  color: var(--fg-dim);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-results-tab.active { color: var(--fg); background: var(--bg-tab-active); }
+.cp-results-tab-title { overflow: hidden; text-overflow: ellipsis; }
+.cp-results-tab-close:hover { color: var(--fg); }
+
+.cp-results-summary { padding: 3px 8px; color: var(--fg-dim); font-size: 12px; }
+.cp-results-tree { flex: 1; min-height: 0; overflow: auto; outline: none; font-family: Consolas, 'Courier New', monospace; font-size: 12px; }
+
+.cp-results-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: var(--bg-side);
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+}
+.cp-results-file:hover { background: var(--bg-hover); }
+.cp-results-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-results-count { color: var(--fg-dim); }
+.cp-results-body[hidden] { display: none; }
+
+.cp-results-match { display: flex; gap: 10px; padding: 1px 8px 1px 24px; cursor: pointer; white-space: pre; }
+.cp-results-match:hover { background: var(--bg-hover); }
+.cp-results-match.selected { background: var(--accent); color: #ffffff; }
+.cp-results-pos { min-width: 56px; color: var(--fg-dim); }
+.cp-results-match.selected .cp-results-pos { color: inherit; }
+.cp-results-preview { overflow: hidden; text-overflow: ellipsis; }
+.cp-results-hit { color: inherit; background: var(--cp-hit); }
