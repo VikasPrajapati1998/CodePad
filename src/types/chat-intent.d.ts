@@ -23,7 +23,23 @@ type CodePadChatAction =
   | 'find-replace'
   | 'open-file'
   | 'close-file'
+  | 'insert-at'
+  | 'analyze-document'
+  | 'outline'
+  | 'find-duplicates'
+  | 'translate'
+  | 'move-file'
+  | 'move-block'
+  | 'create-folder'
+  | 'multi-step'
+  | 'follow-up'
   | 'answer';
+
+/** Where insert-at puts new content: around a block, at the end of its own text, or at the start / end of the document. */
+type CodePadChatPosition = 'before' | 'after' | 'inside_end' | 'start' | 'end';
+
+/** What a follow-up does with the pending answer card. */
+type CodePadChatFollowUp = 'append' | 'insert' | 'replace-selection' | 'replace-document' | 'revise';
 
 /** Whole-text operations done by a rule (the transform-content tool). */
 type CodePadChatTransform = 'clear' | 'uppercase' | 'lowercase' | 'sort-lines' | 'dedupe-lines' | 'remove-blank-lines' | 'trim-spaces';
@@ -49,6 +65,20 @@ interface CodePadChatIntent {
   descending: boolean;
   /** summarize-content: only the selected text. */
   selectionOnly: boolean;
+  /** edit-file: the request is to complete or continue the text of the file (never a revision of a pending answer). */
+  completion: boolean;
+  /** insert-at / follow-up 'insert' / outline: where the new content goes; null when the sentence names no place. */
+  position: CodePadChatPosition | null;
+  /** The words that name the place ("the second paragraph", "line 4"), resolved with CodePadDocModel.parseRef; null = none. */
+  placeText: string | null;
+  /** insert-at: the content goes at the end of a list ("append three points to the existing list"). */
+  intoList: boolean;
+  /** translate: the target language as written ("French"); null when the sentence names none. */
+  language: string | null;
+  /** multi-step: the sentences of the steps in order; empty for every other action. */
+  steps: string[];
+  /** The request works on the pending answer card when there is one (follow-up, or a revision such as "add an example"). */
+  followUp: CodePadChatFollowUp | null;
 }
 
 interface CodePadChatIntentApi {

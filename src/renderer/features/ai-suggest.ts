@@ -21,6 +21,10 @@
   let engineState = 'off';
   let seq = 0;
   const configured = new WeakSet<object>();
+  /** Request id of every suggestion handed to Monaco, so shown/accepted reports name it (main knows the text). */
+  const suggestionIds = new WeakMap<object, number>();
+  /** The suggestion on screen and its insert text; accepted when exactly that text is typed in by Tab/Right Arrow. */
+  let visible: { reqId: number; text: string } | null = null;
 
   /** The context given to `init`; commands only run after it. */
   function app(): CodePadCtx {
@@ -51,6 +55,13 @@
         resolve(false);
       });
     });
+  }
+
+  /** Reports ghost-text use for personal learning (main ignores it while the setting is off). */
+  function report(outcome: 'shown' | 'accepted', reqId: number, chars?: number): void {
+    if (app().settings.get('ai.learning') === true) {
+      app().ai.learn.record({ kind: 'suggest', outcome, reqId, chars }).catch(() => {});
+    }
   }
 
   function isReady(): boolean {
@@ -161,9 +172,9 @@
       if (token.isCancellationRequested || !answer || answer.reqId !== reqId || typeof answer.text !== 'string' || !answer.text) {
         return none;
       }
-      return {
-        items: [{ insertText: answer.text, range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column) }],
-      };
+      const item = { insertText: answer.text, range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column) };
+      suggestionIds.set(item, reqId);
+      return { items: [item] };
     } catch {
       // A failed request only means no ghost text; the engine state is shown in the status bar.
       return none;
@@ -187,6 +198,12 @@
       const model = editor.getModel();
       atEol.set(Boolean(position && model && position.column === model.getLineMaxColumn(position.lineNumber)));
     };
+    editor.onDidChangeModelContent((event) => {
+      if (visible && event.changes.some((change) => change.text === visible?.text)) {
+        report('accepted', visible.reqId);
+        visible = null;
+      }
+    });
     editor.onDidChangeCursorPosition(update);
     editor.onDidChangeModel(update);
     update();
@@ -237,6 +254,20 @@
       const { monaco } = ctx;
       monaco.languages.registerInlineCompletionsProvider('*', {
         provideInlineCompletions: (model, position, context, token) => provide(monaco, model, position, context, token),
+        handleItemDidShow(_completions, item) {
+          const reqId = suggestionIds.get(item);
+          if (reqId !== undefined && typeof item.insertText === 'string' && visible?.reqId !== reqId) {
+            visible = { reqId, text: item.insertText };
+            report('shown', reqId);
+          }
+        },
+        handlePartialAccept(_completions, item, acceptedCharacters) {
+          const reqId = suggestionIds.get(item);
+          if (reqId !== undefined && acceptedCharacters > 0) {
+            report('accepted', reqId, acceptedCharacters);
+            visible = null;
+          }
+        },
         freeInlineCompletions() {},
       });
       setup(ctx.editor);

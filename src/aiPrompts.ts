@@ -414,28 +414,56 @@ export interface ChatTurn {
 /** Everything the chat prompt is built from (file text and history are already cut to the model's budget). */
 export interface ChatPromptInput {
   instruction: string;
+  /** Learned style sentence (made in main from the user's feedback), added to the answer prompt. */
+  hint?: string;
   fileName?: string;
   fileText?: string;
   history: ChatTurn[];
   output: ChatOutput;
 }
 
+/** Quality rule for every piece of prose the assistant writes. */
+const PROSE_RULE = ' Write like a well-edited book: complete sentences, correct spelling, punctuation (commas, full stops) and capitalization, and one blank line between paragraphs.';
+
 const CHAT_SYSTEM_ANSWER =
-  'You are the assistant of a text editor. Answer the user\'s request briefly and directly in the same language as the request. ' +
+  'You are the assistant of a text editor. Answer the user\'s request directly in the same language as the request; be brief unless the request asks for an essay, article, story or a length. ' +
   'The current file, if any, is given between <<< and >>>; use it only when the request is about it. ' +
-  'Never invent content that is not in the file. Write plain text only: no XML or HTML tags such as <response>.';
+  'Never invent content that is not in the file. Write plain text only: no XML or HTML tags such as <response>.' + PROSE_RULE;
 
 const CHAT_SYSTEM_FILE =
   'You are the writing engine of a text editor. Carry out the user\'s request and output ONLY the complete content of the resulting file. ' +
   'No explanations, no introduction, no closing remark and no code fence around the file. ' +
   'The current file, if any, is given between <<< and >>>; keep everything the request does not ask to change. ' +
-  'Never invent facts, names, numbers or dates. Do not wrap the answer in XML or HTML tags such as <response>.';
+  'If the request is to complete or continue the text, keep the existing text, finish any unfinished sentence or word at its end, and add the new text after it. ' +
+  'Never invent facts, names, numbers or dates. Do not wrap the answer in XML or HTML tags such as <response>.' +
+  PROSE_RULE;
 
 // New content for a file of any type (text, JSON, code...): the task names the file type and the format rules.
 const CHAT_SYSTEM_WRITE =
   'You are the content writer of a text editor. Write the new content the task asks for, in the format of the file type the task names. ' +
   'Output ONLY that content: no title unless asked, no introduction, no closing remark, no explanation and no code fence. ' +
-  'Do not repeat the task. Do not wrap the answer in XML or HTML tags such as <response>.';
+  'Do not repeat the task. Do not wrap the answer in XML or HTML tags such as <response>.' +
+  PROSE_RULE;
+
+const NUMBER_WORDS: Readonly<Record<string, number>> = Object.freeze({
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+});
+
+/** The length and paragraph count a request names ("500 words", "2 paragraphs", "two paragraphs"), null when it names none. */
+export function requestedShape(request: string): { words: number | null; paragraphs: number | null } {
+  const words = /\b(\d{2,4})\s*-?\s*words?\b/i.exec(request);
+  const paragraphs = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:short\s+|long\s+)?paragraphs?\b/i.exec(request);
+  const count = paragraphs ? (NUMBER_WORDS[paragraphs[1].toLowerCase()] ?? Number(paragraphs[1])) : 0;
+  return { words: words ? Number(words[1]) : null, paragraphs: count >= 1 && count <= 20 ? count : null };
+}
+
+/** Longest learned style sentence a prompt accepts (the worker checks it again). */
+export const MAX_HINT_CHARS = 320;
+
+/** Adds the learned style sentence to a system prompt (nothing when there is none). */
+export function withHint(system: string, hint: string | undefined): string {
+  return hint ? `${system} ${hint.slice(0, MAX_HINT_CHARS)}` : system;
+}
 
 const CHAT_TEMPERATURE = { answer: 0.4, file: 0.2, write: 0.5 } as const;
 
@@ -445,7 +473,7 @@ const CHAT_TEMPERATURE = { answer: 0.4, file: 0.2, write: 0.5 } as const;
  * @param maxTokens Largest answer in tokens.
  * @returns Chat prompt and generation options (the stop list has no blank-line stop, so files keep their paragraphs).
  */
-export function buildChatPrompt({ instruction, fileName, fileText, history, output }: ChatPromptInput, maxTokens: number): BuiltPrompt<ChatSpec> {
+export function buildChatPrompt({ instruction, hint, fileName, fileText, history, output }: ChatPromptInput, maxTokens: number): BuiltPrompt<ChatSpec> {
   const parts: string[] = [];
   if (history.length > 0) {
     const turns = history.map((turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content}`).join('\n');
@@ -455,10 +483,15 @@ export function buildChatPrompt({ instruction, fileName, fileText, history, outp
     parts.push(`Current file${fileName ? ` "${quoteName(fileName)}"` : ''}:\n<<<\n${fileText}\n>>>`);
   }
   parts.push(output === 'write' ? instruction : `Request: ${instruction}`);
+  const shape = requestedShape(instruction);
+  if (shape.words !== null || shape.paragraphs !== null) {
+    const size = [shape.words !== null ? `about ${shape.words} words` : '', shape.paragraphs !== null ? `exactly ${shape.paragraphs} paragraphs` : ''].filter(Boolean).join(' in ');
+    parts.push(`Requirements: ${size}. Separate the paragraphs with one blank line.`);
+  }
   return {
     spec: {
       kind: 'chat',
-      system: output === 'file' ? CHAT_SYSTEM_FILE : output === 'write' ? CHAT_SYSTEM_WRITE : CHAT_SYSTEM_ANSWER,
+      system: output === 'file' ? CHAT_SYSTEM_FILE : output === 'write' ? CHAT_SYSTEM_WRITE : withHint(CHAT_SYSTEM_ANSWER, hint),
       user: parts.join('\n\n'),
       assistantPrefix: '',
     },

@@ -23,6 +23,8 @@
   interface RewriteJob {
     jobId: number;
     mode: RewriteMode;
+    /** The restructure instruction the user typed (empty for grammar checks or none given). */
+    instruction: string;
     source: RewriteSource;
     item: CodePadStatusItem;
     toast: { root: HTMLElement; label: HTMLElement; bar: HTMLProgressElement };
@@ -56,6 +58,23 @@
       node.textContent = text;
     }
     return node;
+  }
+
+  const learningOn = (ctx: CodePadCtx): boolean => ctx.settings.get('ai.learning') === true;
+
+  /** Tells main how a finished rewrite ended (only while learning is on; failures never surface). */
+  function reportOutcome(ctx: CodePadCtx, current: RewriteJob, outcome: 'applied' | 'discarded'): void {
+    if (!learningOn(ctx)) {
+      return;
+    }
+    ctx.ai.learn
+      .record({
+        kind: 'rewrite',
+        mode: current.mode,
+        outcome,
+        ...(current.mode === 'restructure' && current.instruction ? { instruction: current.instruction } : {}),
+      })
+      .catch(() => {});
   }
 
   async function notice(ctx: CodePadCtx, title: string, message: string, buttons: string[] = ['OK']): Promise<number> {
@@ -170,6 +189,23 @@
         counter.textContent = `${input.value.length} / ${MAX_INSTRUCTION_CHARS}`;
       });
       body.appendChild(counter);
+      if (learningOn(ctx)) {
+        const chips = el('div', 'cp-ai-chips');
+        body.appendChild(chips);
+        ctx.ai.learn.instructions().then((wishes) => {
+          wishes.forEach((wish) => {
+            const chip = el('button', 'cp-button cp-ai-chip', wish);
+            chip.type = 'button';
+            chip.title = 'Use this instruction';
+            chip.addEventListener('click', () => {
+              input.value = wish.slice(0, MAX_INSTRUCTION_CHARS);
+              counter.textContent = `${input.value.length} / ${MAX_INSTRUCTION_CHARS}`;
+              input.focus();
+            });
+            chips.appendChild(chip);
+          });
+        }).catch(() => {});
+      }
       let scope: HTMLSelectElement | null = null;
       if (hasSelection) {
         scope = el('select', 'cp-input');
@@ -308,6 +344,7 @@
     }
     const finish = async (apply: boolean): Promise<void> => {
       reviewing = false;
+      reportOutcome(ctx, current, apply ? 'applied' : 'discarded');
       try {
         await ctx.tabs.close(diffTab, { force: true });
       } catch {
@@ -435,6 +472,7 @@
       const current: RewriteJob = {
         jobId: reply.jobId,
         mode,
+        instruction,
         source,
         item: ctx.status.addItem({ id: 'ai-rewrite', order: 1, onClick: () => cancelJob() }),
         toast: createToast(),

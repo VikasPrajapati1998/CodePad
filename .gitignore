@@ -21,6 +21,7 @@ logs/
 npm-debug.log*
 
 # Claude scratch space and personal local settings
+.claude/
 .claude/temp/
 .claude/memory/
 .claude/settings.local.json

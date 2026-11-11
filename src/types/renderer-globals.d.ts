@@ -540,6 +540,10 @@ interface CodePadFilesApi {
   rename(filePath: string, newName: string): Promise<CpFileOpResult<{ path: string }>>;
   /** Moves a file to the OS trash after main's native Yes/No box; `{ok:false, cancelled:true}` when declined. */
   trash(filePath: string): Promise<CpFileOpResult>;
+  /** Moves a file into `destDir` inside the opened folder, keeping its name; refused when the target exists. */
+  move(filePath: string, destDir: string): Promise<CpFileOpResult<{ path: string }>>;
+  /** Creates the folder `name` (a bare folder name) in `parentDir` inside the opened folder; never reuses one. */
+  mkdir(parentDir: string, name: string): Promise<CpFileOpResult<{ path: string }>>;
   watch(filePath: string): Promise<{ ok: boolean }>;
   unwatch(filePath: string): Promise<{ ok: true }>;
   readonly recent: {
@@ -631,3 +635,23 @@ declare var CodePadUI: Readonly<CodePadUIApi>;
 declare var CodePadPanels: Readonly<CodePadPanelsApi>;
 declare var CodePadFeatures: Readonly<CodePadFeaturesApi>;
 declare var CodePadEditors: Readonly<CodePadEditorsApi>;
+
+// ---------- Version history (renderer/core/versions.ts) ----------
+
+interface CodePadVersionEntry {
+  id: number;
+  label: string;
+  /** Milliseconds since the epoch. */
+  time: number;
+  /** The tab text with LF line breaks. */
+  text: string;
+}
+
+interface CodePadVersionsApi {
+  /** Stores the tab's text (max 30 per tab; skipped when equal to the newest version). */
+  snapshot(tab: CodePadTextTab, label: string): void;
+  /** Oldest first. */
+  list(tab: CodePadTextTab): CodePadVersionEntry[];
+}
+
+declare var CodePadVersions: Readonly<CodePadVersionsApi>;

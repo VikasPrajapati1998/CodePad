@@ -1,12 +1,15 @@
 /**
  * Message protocol between the AI engine controller (aiEngine.ts, main) and the AI utility process (aiWorker.ts),
- * plus the error type both sides use. Types only: nothing here runs.
+ * plus the error type both sides use. Types and one shared constant only: nothing here has side effects.
  */
 
 import type { ChatOutput, ChatTurn, GenOptions, RawSpec } from './aiPrompts';
 import type { ChatLimits } from './chat';
 import type { RewriteMode, RewriteStats } from './rewriter';
 import type { SummaryPhase, SummaryStats } from './summarizer';
+
+/** Context size in tokens of the worker's text-job slots (summary, rewrite and chat), whatever model is loaded. */
+export const TEXT_JOB_CONTEXT_TOKENS = 4096;
 
 /** Error with a stable machine-readable code (`E_ENGINE | E_ABORTED | E_PROMPT_TOO_LONG | E_NO_MODEL | ...`). */
 export interface EngineError extends Error {
@@ -61,6 +64,7 @@ export type WorkerRequest =
       text: string;
       mode: RewriteMode;
       instruction: string;
+      hint?: string;
       languageId: string;
       chunkTokens: number;
       maxOutputTokens: number;
@@ -69,6 +73,7 @@ export type WorkerRequest =
       type: 'chat';
       id: number;
       instruction: string;
+      hint?: string;
       fileName?: string;
       fileText?: string;
       history: ChatTurn[];
@@ -112,6 +117,13 @@ export interface ChatResultMessage {
   warnings: string[];
 }
 
+/** Worker to main: the chat answer generated so far (whole text, not a delta; throttled by the worker; never logged). */
+export interface PartialMessage {
+  type: 'partial';
+  id: number;
+  text: string;
+}
+
 /** Worker to main. */
 export type WorkerMessage =
   | { type: 'step'; label: string }
@@ -121,5 +133,6 @@ export type WorkerMessage =
   | SummaryResultMessage
   | RewriteResultMessage
   | ChatResultMessage
+  | PartialMessage
   | { type: 'progress'; id: number; phase: SummaryPhase | 'rewrite' | 'chat'; current: number; total: number; markdown: string | null }
   | { type: 'error'; id: number; code: string; message: string };

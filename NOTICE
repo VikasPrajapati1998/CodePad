@@ -11,10 +11,9 @@ AI model: Qwen3-0.6B
   first use of the AI features, from registry.ollama.ai (Hugging Face Qwen/Qwen3-0.6B-GGUF as a backup),
   and is checked against a fixed SHA-256 fingerprint. CodePad does not modify it.
 
-Spell checking word list: dictionaries/en.txt, the American-English SCOWL word list (levels up to 70,
-  expanded word forms), taken from the npm package wordlist-english 1.2.1. Copyright 2000-2016 Kevin Atkinson
-  and the other contributors named in dictionaries/LICENSE-SCOWL.txt (permissive licence, shipped next to the
-  list). The checker is CodePad's own code and runs offline in the main process; no text leaves the computer.
+Spell checking: nspell 2.1.5 (MIT, Titus Wormer) with the Hunspell American-English dictionary of the
+  dictionary-en 4.0.0 package (MIT AND BSD; the word list derives from SCOWL and Hunspell en_US, see the
+  license file shipped next to it). Both run offline in the main process; no text leaves the computer.
 
 Inference engine: node-llama-cpp 3.22.1
   Copyright (c) 2023 Gilad S. MIT License.

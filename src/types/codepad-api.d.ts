@@ -403,6 +403,45 @@ interface CpAiChatRequest {
   output: 'answer' | 'file' | 'write';
 }
 
+/** What the renderer reports for personal learning; main ignores everything while `ai.learning` is off. */
+type CpAiLearnEvent =
+  /** `reqId` is the id of an `ai:suggest` result; `chars` is the length of a partly accepted suggestion. */
+  | { kind: 'suggest'; outcome: 'shown' | 'accepted'; reqId: number; chars?: number }
+  | { kind: 'chat'; rating: 'up' | 'down'; answerChars: number }
+  | { kind: 'rewrite'; mode: 'grammar' | 'restructure'; outcome: 'applied' | 'discarded'; instruction?: string }
+  /** Rates the most recent summary; main knows which format it used. */
+  | { kind: 'summary'; rating: 'up' | 'down' };
+
+/** Readable summary of what the AI learned (no stored text). */
+interface CpAiLearnInfo {
+  enabled: boolean;
+  lines: string[];
+}
+
+/** Everything the learning manager lists (see aiLearning.ts). */
+interface CpAiLearnDetails {
+  enabled: boolean;
+  features: { suggest: boolean; chat: boolean; rewrite: boolean; summary: boolean };
+  phrases: Array<{ language: string; context: string; text: string; accepted: number; shown: number }>;
+  wishes: Array<{ text: string; count: number }>;
+  /** The user's own sentence per prompt ('' when none), at most 150 characters. */
+  custom: { chat: string; grammar: string; restructure: string };
+  /** The sentence learned from feedback alone per prompt ('' when nothing was learned yet). */
+  learned: { chat: string; grammar: string; restructure: string };
+}
+
+/** What the active chat model can take, for sizing document parts (`ai:chat:limits`). */
+interface CpAiChatLimits {
+  /** Context window in tokens of the model that will answer. */
+  contextTokens: number;
+  /** Largest answer in tokens. */
+  maxOutputTokens: number;
+  /** Largest file text main passes on in one request (longer text is cut to an excerpt). */
+  maxFileChars: number;
+  /** True for the built-in or another local model. */
+  local: boolean;
+}
+
 interface CpAiModelSpec {
   kind: Exclude<CpAiModelKind, 'builtin' | 'ollama-registry'>;
   label?: string;
@@ -443,10 +482,11 @@ interface CpAiPullProgress {
 interface CpAiChatEvent {
   type: 'chat';
   jobId: number;
-  phase: 'loading' | 'progress' | 'consentRequired' | 'modelFailed' | 'done' | 'error' | 'cancelled';
+  /** 'partial' streams the answer so far (in `text`, the whole text up to now, not a delta). */
+  phase: 'loading' | 'progress' | 'partial' | 'consentRequired' | 'modelFailed' | 'done' | 'error' | 'cancelled';
   current?: number;
   total?: number;
-  /** Set with phase 'done'. */
+  /** Set with phase 'done' (the cleaned answer) and 'partial' (the raw text generated so far). */
   text?: string;
   /** Set with phase 'done', for example that only an excerpt of the file was read. */
   warnings?: string[];
@@ -515,6 +555,19 @@ interface CpSpellMisspelling {
   suggestions: string[];
 }
 
+/** One finding of the online grammar check; `offset`/`length` are UTF-16 units of the text that was sent. */
+interface CpGrammarMatch {
+  offset: number;
+  length: number;
+  message: string;
+  ruleId: string;
+  replacements: string[];
+}
+
+type CpGrammarResult =
+  | { ok: true; matches: CpGrammarMatch[] }
+  | { ok: false; code: 'cancelled' | 'offline' | 'rateLimit' | 'tooLarge' | 'empty' | 'failed'; message: string };
+
 interface CpSpellCheckResult {
   misspelled: CpSpellMisspelling[];
 }
@@ -572,6 +625,8 @@ interface CpIpcChannels {
   'watch:add': CpChannel<[path: string], { ok: boolean }>;
   'watch:remove': CpChannel<[path: string], { ok: true }>;
   /** Up to 2000 words of at most 64 characters each. */
+  /** Sends the text (at most 20000 characters) to the free LanguageTool service after a native confirmation in main. */
+  'grammar:check': CpChannel<[text: string], CpGrammarResult>;
   'spell:check': CpChannel<[words: string[]], CpSpellCheckResult>;
   'spell:addWord': CpChannel<[word: string], { ok: boolean }>;
 
@@ -592,10 +647,29 @@ interface CpIpcChannels {
   'ai:rewrite:cancel': CpChannel<[jobId: number], boolean>;
   'ai:chat:start': CpChannel<[request: CpAiChatRequest], CpAiResult<{ jobId: number }>>;
   'ai:chat:cancel': CpChannel<[jobId: number], boolean>;
+  /** The budget of the model a chat started now would use. */
+  'ai:chat:limits': CpChannel<[], CpAiChatLimits>;
+  'ai:learn:record': CpChannel<[event: CpAiLearnEvent], boolean>;
+  'ai:learn:info': CpChannel<[], CpAiLearnInfo>;
+  /** Restructure wishes this user applied before (empty while learning is off). */
+  'ai:learn:instructions': CpChannel<[], string[]>;
+  /** Main asks Yes/No in a native box, then erases everything learned. */
+  'ai:learn:clear': CpChannel<[], { cleared: boolean }>;
+  'ai:learn:details': CpChannel<[], CpAiLearnDetails>;
+  /** Deletes one listed item; `text` must match the item at `index` (false when the list changed meanwhile). */
+  'ai:learn:remove': CpChannel<[kind: 'phrase' | 'wish', index: number, text: string], boolean>;
+  /** Sets the user's own sentence for a prompt; '' removes it. */
+  'ai:learn:setCustom': CpChannel<[key: 'chat' | 'grammar' | 'restructure', text: string], boolean>;
+  /** Main asks Yes/No in a native box, then forgets ratings and Apply/discard counts (phrases and wishes stay). */
+  'ai:learn:resetHints': CpChannel<[], { reset: boolean }>;
   /** Creates a new file (never overwrites) inside the opened folder; the path is approved afterwards. */
   'files:create': CpChannel<[path: string, content: string], CpFileOpResult<{ path: string }>>;
   /** `newName` is a bare file name; the file stays in its folder and nothing is overwritten. */
   'files:rename': CpChannel<[path: string, newName: string], CpFileOpResult<{ path: string }>>;
+  /** Moves a file into another folder inside the opened folder, keeping its name; nothing is overwritten. */
+  'files:move': CpChannel<[path: string, destDir: string], CpFileOpResult<{ path: string }>>;
+  /** Creates the folder `name` (a bare folder name) in `parentDir` inside the opened folder; never reuses an existing one. */
+  'files:mkdir': CpChannel<[parentDir: string, name: string], CpFileOpResult<{ path: string }>>;
   /** Main asks Yes/No in a native box, then moves the file to the OS trash. */
   'files:trash': CpChannel<[path: string], CpFileOpResult>;
   'ai:models:list': CpChannel<[], { ok: true; models: CpAiModelEntry[] }>;
@@ -659,8 +733,15 @@ interface CodePadApi {
     remove: CpInvoke<'watch:remove'>;
     onEvent: CpSubscribe<CpWatchEvent>;
   };
-  files: { create: CpInvoke<'files:create'>; rename: CpInvoke<'files:rename'>; trash: CpInvoke<'files:trash'> };
+  files: {
+    create: CpInvoke<'files:create'>;
+    rename: CpInvoke<'files:rename'>;
+    trash: CpInvoke<'files:trash'>;
+    move: CpInvoke<'files:move'>;
+    mkdir: CpInvoke<'files:mkdir'>;
+  };
   spell: { check: CpInvoke<'spell:check'>; addWord: CpInvoke<'spell:addWord'> };
+  grammar: { check: CpInvoke<'grammar:check'> };
   settings: { get: CpInvoke<'settings:get'>; patch: CpInvoke<'settings:set'> };
   commands: { table: CpInvoke<'commands:table'> };
   recent: {
@@ -701,6 +782,17 @@ interface CodePadApi {
     cancelRewrite: CpInvoke<'ai:rewrite:cancel'>;
     chat: CpInvoke<'ai:chat:start'>;
     cancelChat: CpInvoke<'ai:chat:cancel'>;
+    chatLimits: CpInvoke<'ai:chat:limits'>;
+    learn: {
+      record: CpInvoke<'ai:learn:record'>;
+      info: CpInvoke<'ai:learn:info'>;
+      instructions: CpInvoke<'ai:learn:instructions'>;
+      clear: CpInvoke<'ai:learn:clear'>;
+      details: CpInvoke<'ai:learn:details'>;
+      remove: CpInvoke<'ai:learn:remove'>;
+      setCustom: CpInvoke<'ai:learn:setCustom'>;
+      resetHints: CpInvoke<'ai:learn:resetHints'>;
+    };
     models: {
       list: CpInvoke<'ai:models:list'>;
       add: CpInvoke<'ai:models:add'>;

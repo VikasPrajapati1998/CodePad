@@ -41,6 +41,8 @@ export interface SuggestRequest {
   scope: string;
   languageId: string;
   multiline: boolean;
+  /** Factor for the suggestion length learned from the user's behavior (1 when nothing was learned). */
+  tokenScale?: number;
 }
 
 /** Result of a suggestion request. */
@@ -66,6 +68,12 @@ export interface SummaryHandlers {
   onProgress?: (progress: EngineProgress) => void;
 }
 
+/** Handlers of a chat run: a summary run's plus the streamed answer. */
+export interface ChatHandlers extends SummaryHandlers {
+  /** The whole answer generated so far (throttled by the worker); never logged. */
+  onPartial?: (text: string) => void;
+}
+
 /** Summary body and statistics. */
 export interface SummaryOutcome {
   markdown: string;
@@ -77,6 +85,8 @@ export interface RewriteJobRequest {
   text: string;
   mode: RewriteMode;
   instruction: string;
+  /** Learned style sentence (may be empty). */
+  hint?: string;
   languageId: string;
   /** Chunk size in tokens (200 to 2400). */
   chunkTokens: number;
@@ -95,6 +105,8 @@ export interface RewriteOutcome {
 /** A validated chat request from main. */
 export interface ChatJobRequest {
   instruction: string;
+  /** Learned style sentence (may be empty). */
+  hint?: string;
   fileName?: string;
   fileText?: string;
   history: ChatTurn[];
@@ -127,7 +139,7 @@ export interface Engine {
   suggest(req: SuggestRequest, signal?: AbortSignal): Promise<SuggestOutcome>;
   summarize(job: SummaryJob, handlers?: SummaryHandlers): Promise<SummaryOutcome>;
   rewrite(job: RewriteJobRequest, handlers?: SummaryHandlers): Promise<RewriteOutcome>;
-  chat(job: ChatJobRequest, handlers?: SummaryHandlers): Promise<ChatOutcome>;
+  chat(job: ChatJobRequest, handlers?: ChatHandlers): Promise<ChatOutcome>;
   preload(): Promise<void>;
   busy(): { suggest: boolean; summary: boolean };
   unload(): Promise<void>;
@@ -140,6 +152,7 @@ interface PendingEntry {
   resolve: (message: ResultMessage) => void;
   reject: (error: unknown) => void;
   onProgress?: (progress: EngineProgress) => void;
+  onPartial?: (text: string) => void;
   lastPhase?: string | null;
   lastAt?: number;
 }
@@ -276,6 +289,11 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
         }
         break;
       }
+      case 'partial':
+        if (typeof data.text === 'string') {
+          pending.get(data.id)?.onPartial?.(data.text);
+        }
+        break;
       case 'error':
         pending.get(data.id)?.reject(engineError(data.code, data.message));
         pending.delete(data.id);
@@ -502,10 +520,10 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
     }
   }
 
-  function cacheKey({ prefix, header, scope, suffix, languageId, multiline }: SuggestRequest): string {
+  function cacheKey({ prefix, header, scope, suffix, languageId, multiline, tokenScale }: SuggestRequest): string {
     return crypto
       .createHash('sha1')
-      .update(`${prefix.slice(-CACHE_PREFIX_CHARS)}\0${header}\0${scope}\0${suffix.slice(0, CACHE_SUFFIX_CHARS)}\0${languageId}\0${multiline}`)
+      .update(`${prefix.slice(-CACHE_PREFIX_CHARS)}\0${header}\0${scope}\0${suffix.slice(0, CACHE_SUFFIX_CHARS)}\0${languageId}\0${multiline}\0${tokenScale ?? 1}`)
       .digest('hex');
   }
 
@@ -585,7 +603,7 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
         suffix: req.suffix,
         languageId: req.languageId,
         multiline: req.multiline,
-        maxTokens: Number(getSettings()['ai.maxSuggestionTokens']) || 24,
+        maxTokens: Math.max(1, Math.round((Number(getSettings()['ai.maxSuggestionTokens']) || 24) * (req.tokenScale ?? 1))),
       });
       job.id = nextId;
       nextId += 1;
@@ -618,10 +636,11 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
   /**
    * Runs one text job (summary or rewrite) inside the worker; only one runs at a time.
    * @param request Builds the worker request for the allocated request id.
-   * @param handlers `onProgress({phase, current, total, markdown})`, with `phase: 'loading'` while the model starts.
+   * @param handlers `onProgress({phase, current, total, markdown})`, with `phase: 'loading'` while the model starts;
+   *   `onPartial(text)` for streamed chat text.
    * @returns The worker's result message.
    */
-  async function runTextJob(request: (id: number) => WorkerRequest, { signal, onProgress }: SummaryHandlers = {}): Promise<ResultMessage> {
+  async function runTextJob(request: (id: number) => WorkerRequest, { signal, onProgress, onPartial }: ChatHandlers = {}): Promise<ResultMessage> {
     if (summaryRunning) {
       throw engineError('E_BUSY', 'An AI text job is already running.');
     }
@@ -639,7 +658,7 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
         return await new Promise<ResultMessage>((resolve, reject) => {
-          pending.set(id, { resolve, reject, onProgress, lastPhase: null, lastAt: 0 });
+          pending.set(id, { resolve, reject, onProgress, onPartial, lastPhase: null, lastAt: 0 });
           proc.postMessage(request(id));
         });
       } finally {
@@ -692,6 +711,7 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
         text: job.text,
         mode: job.mode,
         instruction: job.instruction,
+        hint: job.hint,
         languageId: job.languageId,
         chunkTokens: job.chunkTokens,
         maxOutputTokens: job.maxOutputTokens,
@@ -704,15 +724,17 @@ export function createEngine({ workerPath, getModel, getSettings, log = NO_LOG }
   /**
    * Runs one chat request inside the worker (one text job at a time, shared with summaries and rewrites).
    * @param job Validated job from main.
-   * @param handlers `onProgress`: `phase: 'loading'` while the model starts, then `'chat'` when generation begins.
+   * @param handlers `onProgress`: `phase: 'loading'` while the model starts, then `'chat'` when generation begins;
+   *   `onPartial(text)`: the raw answer so far while it is generated.
    * @returns The cleaned answer and warnings.
    */
-  async function chat(job: ChatJobRequest, handlers: SummaryHandlers = {}): Promise<ChatOutcome> {
+  async function chat(job: ChatJobRequest, handlers: ChatHandlers = {}): Promise<ChatOutcome> {
     const result = (await runTextJob(
       (id) => ({
         type: 'chat',
         id,
         instruction: job.instruction,
+        hint: job.hint,
         fileName: job.fileName,
         fileText: job.fileText,
         history: job.history,

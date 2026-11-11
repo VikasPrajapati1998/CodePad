@@ -1,7 +1,7 @@
 // AI chat assistant: a draggable round icon at the bottom-right opens a draggable, resizable chat pop-up. The user types
 // what to do with files in plain words; a deterministic parser (shared/chatIntent.ts) picks the action and the matching
-// tool (features/ai-chat-tools.ts) does the work. This file is the window only: icon, pop-up, transcript, input and the
-// AI job plumbing (ctx.ai.chat). Every change is a proposal card created by a tool. All dynamic text is set with
+// tool (features/ai-chat-tools.ts) does the work. This file is the window only: icon, pop-up (minimize, maximize, new
+// chat, model selector, quick actions), transcript with the streamed draft, input and the AI job plumbing (ctx.ai.chat). Every change is a proposal card created by a tool. All dynamic text is set with
 // textContent.
 (() => {
   const MAX_INSTRUCTION_CHARS = 2000;
@@ -19,6 +19,7 @@
   interface ChatJob {
     jobId: number;
     onDone(text: string, warnings: string[]): void;
+    onFail?(): void;
   }
 
   let appCtx: CodePadCtx | null = null;
@@ -35,7 +36,17 @@
   let sendButton: HTMLButtonElement | null = null;
   let stopButton: HTMLButtonElement | null = null;
   let statusLine: HTMLElement | null = null;
-  let modelLine: HTMLElement | null = null;
+  let modelSelect: HTMLSelectElement | null = null;
+  let minimizeButton: HTMLButtonElement | null = null;
+  let maximizeButton: HTMLButtonElement | null = null;
+  /** The live answer while partial events stream in; removed when the job ends. */
+  let draft: HTMLElement | null = null;
+  /** True while a request is prepared, sent or running (the model selector is disabled then). */
+  let busyNow = false;
+  /** Bumped by New chat; a request started in an older conversation is dropped. */
+  let conversation = 0;
+  /** Size and position before Maximize (inline styles, so an unresized pop-up returns to its CSS size); null when not maximized. */
+  let maximized: { x: number; y: number; width: string; height: string } | null = null;
   /** Window positions (top-left, px); null until moved or first opened. Kept in memory only. */
   let fabPos: { x: number; y: number } | null = null;
   let popupPos: { x: number; y: number } | null = null;
@@ -94,11 +105,30 @@
   }
 
   function setBusy(busy: boolean): void {
+    busyNow = busy;
     need(sendButton).hidden = busy;
     need(stopButton).hidden = !busy;
+    need(modelSelect).disabled = busy;
     if (!busy) {
       setWorking('');
+      removeDraft();
     }
+  }
+
+  /** Shows the answer generated so far in one live message at the end of the transcript. */
+  function showDraft(text: string): void {
+    if (!draft) {
+      draft = el('div', 'cp-chat-msg bot cp-chat-draft');
+      draft.setAttribute('aria-live', 'off');
+      need(transcript).appendChild(draft);
+    }
+    draft.textContent = text;
+    scrollDown();
+  }
+
+  function removeDraft(): void {
+    draft?.remove();
+    draft = null;
   }
 
   /** A proposal card in the transcript: a title, body nodes and buttons. Buttons are disabled once one has run, unless the card is `reusable` (then its buttons work any number of times). */
@@ -130,6 +160,38 @@
     need(transcript).appendChild(card);
     scrollDown();
     return card;
+  }
+
+  /** Adds thumbs up / down under an answer card, only while personal learning is on (checked per answer, so new answers follow the setting). One rating per answer. */
+  function addRating(card: HTMLElement, answer: string): void {
+    const ctx = app();
+    if (ctx.settings.get('ai.learning') !== true) {
+      return;
+    }
+    const row = el('div', 'cp-chat-rating');
+    row.appendChild(el('span', 'cp-chat-note', 'Was this helpful?'));
+    const buttons: HTMLButtonElement[] = [];
+    const choices: { rating: 'up' | 'down'; symbol: string; label: string }[] = [
+      { rating: 'up', symbol: '\u{1F44D}', label: 'Helpful' },
+      { rating: 'down', symbol: '\u{1F44E}', label: 'Not helpful' },
+    ];
+    choices.forEach((choice) => {
+      const button = el('button', 'cp-chat-rate', choice.symbol);
+      button.type = 'button';
+      button.title = choice.label;
+      button.setAttribute('aria-label', choice.label);
+      button.addEventListener('click', () => {
+        buttons.forEach((entry) => {
+          entry.disabled = true;
+        });
+        button.classList.add('chosen');
+        button.setAttribute('aria-pressed', 'true');
+        ctx.ai.learn.record({ kind: 'chat', rating: choice.rating, answerChars: answer.length }).catch(() => {});
+      });
+      buttons.push(button);
+      row.appendChild(button);
+    });
+    card.appendChild(row);
   }
 
   /** Marks a card as handled by replacing its buttons with a note. */
@@ -262,17 +324,52 @@
     return 'The local AI model is not installed yet. Use AI > Download AI Model (523 MB, downloaded once), or choose another model in AI > Manage Models.';
   }
 
-  /** Shows "Using: <active model>" when the model list can be read. */
+  /** Fills the model selector with the enabled models (the active one selected); hidden when the list cannot be read. */
   async function refreshModelLine(): Promise<void> {
-    const line = need(modelLine);
+    const select = need(modelSelect);
+    let models: CpAiModelEntry[] = [];
     try {
       const result = await app().ai.models.list();
-      const active = result.models.find((entry) => entry.active);
-      line.textContent = active ? `Using: ${active.label}` : '';
+      models = result.models.filter((entry) => entry.builtin || entry.enabled);
     } catch {
-      line.textContent = '';
+      models = [];
     }
-    line.hidden = line.textContent === '';
+    select.replaceChildren();
+    models.forEach((entry) => {
+      const option = el('option', undefined, entry.label);
+      option.value = entry.id;
+      option.selected = entry.active;
+      select.appendChild(option);
+    });
+    const active = models.find((entry) => entry.active);
+    if (active) {
+      select.value = active.id;
+      select.title = `Model used by the chat: ${active.label}`;
+    }
+    select.disabled = busyNow;
+    select.hidden = models.length === 0;
+  }
+
+  /** Makes the chosen model the active one; main confirms remote models with its own dialog. */
+  async function chooseModel(): Promise<void> {
+    const select = need(modelSelect);
+    const chosen = select.selectedOptions[0];
+    if (!chosen) {
+      return;
+    }
+    const entry = (await app().ai.models.list()).models.find((item) => item.id === chosen.value);
+    if (!entry) {
+      bot('That model is no longer available.');
+      return;
+    }
+    try {
+      const result = await app().ai.models.setActive(entry.builtin ? null : entry.id);
+      if (!result.ok) {
+        bot(result.message || 'The model could not be selected.');
+      }
+    } catch (error) {
+      bot(`The model could not be selected: ${errorText(error)}`);
+    }
   }
 
   // ---- running a request ----------------------------------------------------------------
@@ -308,11 +405,18 @@
     } else if (ev.phase === 'cancelled') {
       endJob();
       bot('Cancelled.');
+      current.onFail?.();
     } else if (ev.phase === 'error') {
       endJob();
       bot(`The AI request failed: ${ev.message || 'unknown error'}`);
+      current.onFail?.();
     } else if (ev.phase === 'loading') {
       setWorking('Loading the AI model...');
+    } else if (ev.phase === 'partial') {
+      setWorking('Writing...');
+      if (ev.text) {
+        showDraft(ev.text);
+      }
     } else {
       setWorking('Working...');
     }
@@ -336,12 +440,19 @@
     const { tab, output } = options;
     const fileText = (options.text ?? (tab ? lfText(tab) : '')).slice(0, MAX_FILE_CHARS);
 
+    const startedIn = conversation;
     const problem = await modelProblem(ctx);
-    if (problem) {
-      bot(problem);
+    if (startedIn !== conversation) {
+      options.onFail?.();
       return;
     }
-    starting = { events: [], cancelled: false };
+    if (problem) {
+      bot(problem);
+      options.onFail?.();
+      return;
+    }
+    const mine: { events: ChatEvent[]; cancelled: boolean } = { events: [], cancelled: false };
+    starting = mine;
     setBusy(true);
     setWorking('Sending...');
     try {
@@ -351,14 +462,23 @@
         ...(options.withHistory && history.length > 0 ? { history: history.slice(-MAX_HISTORY) } : {}),
         output,
       });
+      if (startedIn !== conversation) {
+        // New chat was pressed while the request was sent: stop it and drop its events.
+        if (reply.ok) {
+          await ctx.ai.cancelChat(reply.jobId);
+        }
+        options.onFail?.();
+        return;
+      }
       if (!reply.ok) {
         setBusy(false);
         bot(reply.message || 'The request was not accepted.');
+        options.onFail?.();
         return;
       }
-      const current: ChatJob = { jobId: reply.jobId, onDone: options.onDone };
-      const early = starting.events;
-      const cancelled = starting.cancelled;
+      const current: ChatJob = { jobId: reply.jobId, onDone: options.onDone, onFail: options.onFail };
+      const early = mine.events;
+      const cancelled = mine.cancelled;
       job = current;
       starting = null;
       setWorking('Working...');
@@ -371,11 +491,38 @@
         }
       });
     } catch (error) {
-      setBusy(false);
+      if (startedIn === conversation) {
+        setBusy(false);
+      }
       throw error;
     } finally {
-      starting = null;
+      // A request of an older conversation must not clear the state of a newer one.
+      if (starting === mine) {
+        starting = null;
+      }
     }
+  }
+
+  /** New chat: stops a running request, forgets the conversation and shows the welcome message again. */
+  function newConversation(): void {
+    conversation += 1;
+    const running = job;
+    if (starting) {
+      starting.cancelled = true;
+    }
+    job = null;
+    starting = null;
+    setBusy(false);
+    if (running) {
+      app().ai.cancelChat(running.jobId).catch(() => undefined);
+      // A tool waiting on this request (a multi-part edit) ends quietly instead of waiting forever.
+      running.onFail?.();
+    }
+    history = [];
+    window.CodePadChatTools.reset();
+    need(transcript).replaceChildren();
+    welcome();
+    need(input).focus();
   }
 
   // ---- sending -------------------------------------------------------------------------------
@@ -403,6 +550,12 @@
     contextTab,
     lfText,
     runAi,
+    runPart: (options) =>
+      new Promise((resolve, reject) => {
+        runAi({ ...options, onDone: (text, warnings) => resolve({ text, warnings }), onFail: () => resolve(null) }).catch(reject);
+      }),
+    scope: () => (app().settings.get('ai.chatScope') === 'all' ? 'all' : 'visible'),
+    addRating,
     remember: (question, answer) => {
       history.push({ role: 'user', content: question.slice(0, MAX_HISTORY_CHARS) });
       history.push({ role: 'assistant', content: answer.slice(0, MAX_HISTORY_CHARS) });
@@ -468,7 +621,7 @@
    */
   function makeDraggable(handle: HTMLElement, target: DragTarget, partner: () => DragTarget | null): void {
     handle.addEventListener('pointerdown', (down) => {
-      if (down.button !== 0 || (down.target instanceof HTMLElement && down.target.closest('button') && down.target !== handle)) {
+      if (down.button !== 0 || (down.target instanceof HTMLElement && down.target.closest('button, select') && down.target !== handle)) {
         return;
       }
       const group = [target, partner()].filter((item): item is DragTarget => item !== null);
@@ -602,6 +755,132 @@
     return icon;
   }
 
+  /** The "works on" choice of the header: the visible part of a long file or all of it (the `ai.chatScope` setting). */
+  function buildScopeSelect(): HTMLElement {
+    const select = el('select', 'cp-chat-scope');
+    select.title = 'What the chat reads and edits of a long file';
+    select.setAttribute('aria-label', 'Chat works on');
+    [['visible', 'Visible part'], ['all', 'Whole file']].forEach(([value, label]) => {
+      const option = el('option', undefined, label);
+      option.value = value;
+      select.appendChild(option);
+    });
+    const sync = (): void => {
+      select.value = services.scope();
+    };
+    select.addEventListener('change', () => {
+      app().settings.set('ai.chatScope', select.value).catch(() => undefined);
+    });
+    app().settings.onChange(({ key }) => {
+      if (key === 'ai.chatScope') {
+        sync();
+      }
+    });
+    sync();
+    return select;
+  }
+
+  /** The model selector: the enabled models, the active one selected (filled by refreshModelLine). */
+  function buildModelSelect(): HTMLSelectElement {
+    const select = el('select', 'cp-chat-model');
+    select.title = 'Model used by the chat';
+    select.setAttribute('aria-label', 'Chat model');
+    select.hidden = true;
+    select.addEventListener('change', () => {
+      chooseModel()
+        .catch((error: unknown) => bot(`The model could not be selected: ${errorText(error)}`))
+        .finally(() => {
+          // Shows the real active model again (also after a refusal in main).
+          refreshModelLine().catch(() => undefined);
+        });
+    });
+    return select;
+  }
+
+  /** A small header button with a symbol, a tooltip and an accessible name. */
+  function headerButton(symbol: string, label: string, run: () => void, extraClass = ''): HTMLButtonElement {
+    const button = el('button', `cp-chat-hbtn${extraClass ? ` ${extraClass}` : ''}`, symbol);
+    button.type = 'button';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', run);
+    return button;
+  }
+
+  function setButtonLabel(button: HTMLButtonElement, symbol: string, label: string, pressed: boolean): void {
+    button.textContent = symbol;
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+  }
+
+  /** Sizes the pop-up to 80% of the window and centres it. */
+  function applyMaximized(): void {
+    const box = need(popup);
+    const view = viewport();
+    const width = Math.round(view.width * 0.8);
+    const height = Math.round(view.height * 0.8);
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+    popupPos = placeInside(box, { x: Math.round((view.width - width) / 2), y: Math.round((view.height - height) / 2) });
+  }
+
+  /** Toggles a large pop-up; restoring returns to the size and position from before. */
+  function toggleMaximize(): void {
+    const box = need(popup);
+    if (maximized) {
+      const saved = maximized;
+      maximized = null;
+      box.style.width = saved.width;
+      box.style.height = saved.height;
+      popupPos = placeInside(box, { x: saved.x, y: saved.y });
+    } else {
+      const rect = box.getBoundingClientRect();
+      maximized = { x: rect.left, y: rect.top, width: box.style.width, height: box.style.height };
+      applyMaximized();
+    }
+    const on = maximized !== null;
+    setButtonLabel(need(maximizeButton), on ? '❐' : '□', on ? 'Restore the chat size' : 'Maximize the chat', on);
+  }
+
+  /** Puts an editable template into the input and focuses it with the caret at the end (nothing is sent). */
+  function fillInput(text: string): void {
+    const box = need(input);
+    box.value = text;
+    box.focus();
+    box.setSelectionRange(text.length, text.length);
+  }
+
+  /** The quick action row under the header: each button fills the input with a template. */
+  function buildQuickActions(): HTMLElement {
+    const row = el('div', 'cp-chat-quick');
+    row.setAttribute('role', 'toolbar');
+    row.setAttribute('aria-label', 'Quick actions');
+    const actions: Array<[string, string]> = [
+      ['Write', 'Write a paragraph about '],
+      ['Rewrite', 'Rewrite this in a professional tone'],
+      ['Append', 'Append a paragraph about '],
+      ['Insert', 'Insert after the second paragraph: '],
+      ['Summarize', 'Summarize this file'],
+      ['Analyze', 'Analyze this document'],
+      ['Expand', 'Expand the last paragraph with more detail'],
+      ['Proofread', 'Proofread this file'],
+      ['Translate', 'Translate this to Hindi'],
+      ['Find & Replace', 'Replace "old" with "new"'],
+      ['Format', 'Format this as Markdown with headings and lists'],
+      ['Continue Writing', 'Continue writing from where I stopped'],
+    ];
+    actions.forEach(([label, template]) => {
+      const button = el('button', 'cp-chat-quick-btn', label);
+      button.type = 'button';
+      button.title = `${template.trim()} (fills the message box)`;
+      button.setAttribute('aria-label', `${label}: fill the message box`);
+      button.addEventListener('click', () => fillInput(template));
+      row.appendChild(button);
+    });
+    return row;
+  }
+
   function buildPopup(): HTMLElement {
     const box = el('div', 'cp-chat-popup');
     box.hidden = true;
@@ -610,16 +889,18 @@
 
     const header = el('div', 'cp-chat-header');
     header.appendChild(el('span', 'cp-chat-title', 'AI Chat Assistant'));
-    modelLine = el('span', 'cp-chat-model');
-    modelLine.hidden = true;
-    header.appendChild(modelLine);
-    const close = el('button', 'cp-chat-close', '×');
-    close.type = 'button';
-    close.title = 'Close';
-    close.setAttribute('aria-label', 'Close the chat');
-    close.addEventListener('click', closePopup);
-    header.appendChild(close);
+    header.appendChild(headerButton('New chat', 'New chat (clears the conversation)', newConversation, 'text'));
+    // Minimize hides the pop-up; the conversation stays and a double-click on the icon brings it back.
+    minimizeButton = headerButton('–', 'Minimize the chat (double-click the chat icon to reopen)', closePopup);
+    maximizeButton = headerButton('□', 'Maximize the chat', toggleMaximize);
+    maximizeButton.setAttribute('aria-pressed', 'false');
+    const close = headerButton('×', 'Close the chat', closePopup, 'cp-chat-close');
+    header.append(minimizeButton, maximizeButton, close);
     makeDraggable(header, { node: box, onMove: (pos) => { popupPos = pos; } }, fabTarget);
+
+    const toolbar = el('div', 'cp-chat-toolbar');
+    modelSelect = buildModelSelect();
+    toolbar.append(modelSelect, buildScopeSelect());
 
     transcript = el('div', 'cp-chat-transcript');
     transcript.setAttribute('role', 'log');
@@ -652,7 +933,7 @@
     });
     composer.append(input, sendButton, stopButton);
 
-    box.append(header, transcript, statusLine, composer);
+    box.append(header, toolbar, buildQuickActions(), transcript, statusLine, composer);
     box.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
@@ -672,11 +953,7 @@
       const chip = el('button', 'cp-chat-example', tool.description);
       chip.type = 'button';
       chip.title = tool.example;
-      chip.addEventListener('click', () => {
-        const box = need(input);
-        box.value = tool.example;
-        box.focus();
-      });
+      chip.addEventListener('click', () => fillInput(tool.example));
       list.appendChild(chip);
     });
     node.appendChild(list);
@@ -686,7 +963,9 @@
     if (fab && fabPos) {
       fabPos = placeInside(fab, fabPos);
     }
-    if (popup && !popup.hidden && popupPos) {
+    if (popup && maximized) {
+      applyMaximized();
+    } else if (popup && !popup.hidden && popupPos) {
       popupPos = placeInside(popup, popupPos);
     }
   }

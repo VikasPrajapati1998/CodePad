@@ -4,6 +4,7 @@
 // with textContent only; nothing from a document is ever inserted as HTML.
 (() => {
   const STREAM_INTERVAL_MS = 250;
+  const RATING_THANKS_MS = 1500;
   const MAX_PDF_PAGES = 3000;
   const MAX_SHEET_ROWS = 20000;
   const MAX_SHEET_COLUMNS = 50;
@@ -268,6 +269,59 @@
     }
   }
 
+  /** The "Was this summary helpful?" box shown after a finished summary while learning is on. */
+  let ratingBox: { root: HTMLElement; tab: CodePadTab } | null = null;
+
+  function removeRatingBox(): void {
+    if (ratingBox) {
+      ratingBox.root.remove();
+      ratingBox = null;
+    }
+  }
+
+  /** Offers a one-time rating of the summary just written. Failures of the learning call are ignored. */
+  function showRatingBox(ctx: CodePadCtx, tab: CodePadTab): void {
+    removeRatingBox();
+    if (ctx.settings.get('ai.learning') !== true) {
+      return;
+    }
+    const root = document.createElement('div');
+    root.className = 'cp-ai-toast';
+    const label = document.createElement('div');
+    label.className = 'cp-ai-toast-label';
+    label.textContent = 'Was this summary helpful?';
+    const actions = document.createElement('div');
+    actions.className = 'cp-ai-actions';
+    const buttons: HTMLButtonElement[] = (['up', 'down'] as const).map((rating) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cp-button';
+      button.textContent = rating === 'up' ? 'Helpful' : 'Not helpful';
+      button.addEventListener('click', () => {
+        buttons.forEach((entry) => {
+          entry.disabled = true;
+        });
+        ctx.ai.learn.record({ kind: 'summary', rating }).catch(() => {});
+        setTimeout(() => {
+          if (ratingBox && ratingBox.root === root) {
+            removeRatingBox();
+          }
+        }, RATING_THANKS_MS);
+        label.textContent = 'Thanks for the feedback.';
+      });
+      return button;
+    });
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'cp-button';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', removeRatingBox);
+    actions.append(...buttons, dismiss);
+    root.append(label, actions);
+    document.body.appendChild(root);
+    ratingBox = { root, tab };
+  }
+
   function createToast(): Toast {
     const root = document.createElement('div');
     root.className = 'cp-ai-toast';
@@ -361,6 +415,7 @@
       endJob(current, null);
       writeText(current, titleOf(current) + (ev.markdown || '').trimEnd() + footer);
       app().status.set(`Summary of ${current.name} is ready.`);
+      showRatingBox(app(), current.tab);
     } else if (ev.phase === 'cancelled') {
       endJob(current, '\n\n_Cancelled._\n');
       app().status.set('Summary cancelled.');
@@ -436,6 +491,7 @@
       return;
     }
     starting = { events: [], cancelled: false };
+    removeRatingBox();
     try {
       if (tab.kind === 'diff') {
         ctx.status.set('Not available for this tab.');
@@ -562,6 +618,9 @@
       appCtx = ctx;
       ctx.ai.onEvent(onAiEvent);
       ctx.events.on('tab:closed', (tab) => {
+        if (ratingBox && ratingBox.tab === tab) {
+          removeRatingBox();
+        }
         if (job && job.tab === tab) {
           cancelJob();
         }

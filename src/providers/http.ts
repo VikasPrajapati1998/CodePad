@@ -277,8 +277,10 @@ export interface PostJsonOptions {
   url: string;
   /** Request headers (may hold the key; never logged or copied to errors). */
   headers: Record<string, string>;
-  /** JSON body. */
-  body: object;
+  /** JSON body, or an already encoded string sent with `contentType`. */
+  body: object | string;
+  /** Content type of a string body (default `application/json`). */
+  contentType?: string;
   /** Cancels the request. */
   signal?: AbortSignal;
   /** Per-attempt timeout. */
@@ -300,6 +302,7 @@ export async function postJson({
   url,
   headers,
   body,
+  contentType = 'application/json',
   signal,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxBytes = MAX_RESPONSE_BYTES,
@@ -307,7 +310,7 @@ export async function postJson({
 }: PostJsonOptions): Promise<unknown> {
   await assertPublicHost(new URL(url).hostname);
   const doFetch = getFetch();
-  const payload = JSON.stringify(body);
+  const payload = typeof body === 'string' ? body : JSON.stringify(body);
   for (let attempt = 0; ; attempt += 1) {
     if (signal?.aborted) {
       throw new ProviderError('E_ABORTED', 'The request was cancelled.');
@@ -324,7 +327,7 @@ export async function postJson({
     try {
       const response = await doFetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
+        headers: { 'content-type': contentType, accept: 'application/json', ...headers },
         body: payload,
         redirect: 'manual',
         credentials: 'omit',

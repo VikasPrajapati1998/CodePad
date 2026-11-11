@@ -1,7 +1,7 @@
 /*
- * File operations of the chat assistant (create, rename, move to the trash). Main owns the trust: every path is
- * resolved and checked by fileAccess (allow-list, no UNC, no alternate data streams, no reserved device names),
- * create is limited to the opened folder, nothing is ever overwritten, and a delete only happens after a native
+ * File operations of the chat assistant (create, rename, move, new folder, move to the trash). Main owns the trust:
+ * every path is resolved and checked by fileAccess (allow-list, no UNC, no alternate data streams, no reserved device
+ * names), create, move and new folders are limited to the opened folder, nothing is ever overwritten, and a delete only happens after a native
  * Yes/No box that main shows (the `confirmTrash` callback). Failures are returned as `{ok:false, code, message}`
  * with text the user can read; nothing about the file content is logged.
  */
@@ -75,22 +75,62 @@ async function guarded<T extends object>(operation: () => Promise<T>): Promise<(
   }
 }
 
-/** Throws unless `name` is a bare, portable file name (no separators, ADS, reserved device name, trailing dot or space). */
-function assertValidName(name: unknown): asserts name is string {
+/**
+ * Throws unless `name` is a bare, portable file or folder name (no separators, ADS, reserved device name, trailing
+ * dot or space). `what` only changes the wording of the refusal.
+ */
+function assertValidName(name: unknown, what: 'file' | 'folder' = 'file'): asserts name is string {
   if (typeof name !== 'string' || name === '' || name.length > MAX_NAME_CHARS) {
-    refuse('invalidName', 'Enter a file name of 1 to 255 characters.');
+    refuse('invalidName', `Enter a ${what} name of 1 to 255 characters.`);
   }
   if (name === '.' || name === '..' || name !== name.trim()) {
-    refuse('invalidName', 'The file name cannot be "." or "..", or start or end with a space.');
+    refuse('invalidName', `The ${what} name cannot be "." or "..", or start or end with a space.`);
   }
   if (INVALID_NAME_CHARS.test(name)) {
-    refuse('invalidName', 'The file name cannot contain / \\ : * ? " < > | or control characters.');
+    refuse('invalidName', `The ${what} name cannot contain / \\ : * ? " < > | or control characters.`);
   }
   try {
     fileAccess.assertWindowsSafe(`/${name}`);
   } catch (error) {
-    refuse('invalidName', error instanceof Error ? error.message : 'This file name is not supported.');
+    refuse('invalidName', error instanceof Error ? error.message : `This ${what} name is not supported.`);
   }
+}
+
+/** The opened folder; refuses when none is open. */
+function requireRoot(action: string): string {
+  const root = fileAccess.getApprovedRoot();
+  if (root === null) {
+    return refuse('noFolder', `Open a folder first, then the assistant can ${action}.`);
+  }
+  return root;
+}
+
+/** True when `target` is the opened folder itself or lies inside it. */
+const isRootOrInside = (root: string, target: string): boolean =>
+  path.relative(root, target) === '' || fileAccess.isInside(root, target);
+
+/**
+ * Real path of an existing folder inside the opened folder (the opened folder itself counts).
+ * @param dirPath Renderer-supplied absolute folder path.
+ * @param root The opened folder.
+ * @param missing Refusal message when the folder does not exist.
+ */
+async function resolveFolderInRoot(dirPath: unknown, root: string, missing: string): Promise<string> {
+  const real = await fileAccess.resolveAllowed(dirPath);
+  if (!isRootOrInside(root, real)) {
+    refuse('outsideFolder', 'That folder is outside the opened folder.');
+  }
+  try {
+    if (!(await fs.stat(real)).isDirectory()) {
+      refuse('notFolder', 'That path is a file, not a folder.');
+    }
+  } catch (error) {
+    if (isErrnoCode(error, 'ENOENT')) {
+      refuse('noParent', missing);
+    }
+    throw error;
+  }
+  return real;
 }
 
 /**
@@ -237,6 +277,62 @@ export function renameFile(filePath: unknown, newName: unknown): Promise<CpFileO
     }
     fileAccess.revokeFile(real);
     await fileAccess.approveFile(target);
+    return { path: target };
+  });
+}
+
+/**
+ * Moves a file into another folder inside the opened folder, keeping its name. The destination folder must exist and
+ * nothing may be at the target path; like a rename, the old path loses its approval and the new one gets it.
+ * @param filePath Absolute path of the existing file (inside the opened folder).
+ * @param destDir Absolute path of the destination folder (the opened folder or a folder inside it).
+ * @returns The real path of the moved file, which is approved afterwards.
+ */
+export function moveFile(filePath: unknown, destDir: unknown): Promise<CpFileOpResult<{ path: string }>> {
+  return guarded(async () => {
+    const root = requireRoot('move files in it');
+    const real = await resolveExistingFile(filePath);
+    if (!fileAccess.isInside(root, real)) {
+      refuse('outsideFolder', 'Only files inside the opened folder can be moved.');
+    }
+    const folder = await resolveFolderInRoot(destDir, root, 'The destination folder does not exist.');
+    const name = path.basename(real);
+    const target = path.join(folder, name);
+    if (path.relative(path.dirname(real), folder) === '') {
+      refuse('unchanged', 'The file is already in this folder.');
+    }
+    assertSafeTarget(target);
+    if (await exists(target)) {
+      refuse('exists', `A file named "${name}" already exists in that folder.`);
+    }
+    await renameNoReplace(real, target, name);
+    fileAccess.revokeFile(real);
+    await fileAccess.approveFile(target);
+    return { path: target };
+  });
+}
+
+/**
+ * Creates a new, empty folder inside the opened folder. Nothing may exist at the path yet and its parent must exist.
+ * @param parentDir Absolute path of the parent folder (the opened folder or a folder inside it).
+ * @param name Bare folder name.
+ * @returns The real path of the new folder (reachable through the opened folder; no file approval is needed).
+ */
+export function makeFolder(parentDir: unknown, name: unknown): Promise<CpFileOpResult<{ path: string }>> {
+  return guarded(async () => {
+    assertValidName(name, 'folder');
+    const root = requireRoot('create folders in it');
+    const parent = await resolveFolderInRoot(parentDir, root, 'The folder for the new folder does not exist.');
+    const target = path.join(parent, name);
+    assertSafeTarget(target);
+    try {
+      await fs.mkdir(target);
+    } catch (error) {
+      if (isErrnoCode(error, 'EEXIST')) {
+        refuse('exists', `A file or folder named "${name}" already exists.`);
+      }
+      throw error;
+    }
     return { path: target };
   });
 }

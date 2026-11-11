@@ -3,6 +3,7 @@ import type { FileFilter, IpcMainInvokeEvent, WebContents } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import * as chatFiles from './chatFiles';
+import { createGrammarService } from './grammarOnline';
 import { errorCode, errorMessage } from './errorUtils';
 import * as fileAccess from './fileAccess';
 import type { FileWatcher } from './fileWatcher';
@@ -26,6 +27,17 @@ const findInFiles = optionalRequire<typeof import('./findInFiles')>('./findInFil
 const fileWatcher = optionalRequire<typeof import('./fileWatcher')>('./fileWatcher');
 const aiIpc = optionalRequire<typeof import('./aiIpc')>('./aiIpc');
 const spellcheck = optionalRequire<typeof import('./spellcheck')>('./spellcheck');
+const grammarService = createGrammarService(async (host, characters) => {
+  const { response } = await dialog.showMessageBox(appWindow(), {
+    type: 'question',
+    buttons: ['Cancel', 'Send'],
+    defaultId: 0,
+    cancelId: 0,
+    message: `Send ${characters} characters of text to ${host} for a grammar check?`,
+    detail: 'This is a free public service. The text leaves this computer and is sent over HTTPS. Nothing is stored by CodePad. You are asked once per session.',
+  });
+  return response === 1;
+});
 
 /** The object `registerAiIpc` returns: settings/window hooks and `dispose`. */
 type AiComposition = ReturnType<typeof import('./aiIpc').registerAiIpc>;
@@ -520,6 +532,8 @@ function registerIpc(): void {
 
   handle('files:create', (_event, filePath, content) => chatFiles.createFile(filePath, content));
   handle('files:rename', (_event, filePath, newName) => chatFiles.renameFile(filePath, newName));
+  handle('files:move', (_event, filePath, destDir) => chatFiles.moveFile(filePath, destDir));
+  handle('files:mkdir', (_event, parentDir, name) => chatFiles.makeFolder(parentDir, name));
   handle('files:trash', (_event, filePath) =>
     chatFiles.trashFile(filePath, {
       confirmTrash: async (name, folder) => {
@@ -614,6 +628,7 @@ function registerIpc(): void {
     return { ok: true };
   });
 
+  handle('grammar:check', (_event, text) => grammarService.check(text));
   handle('spell:check', (_event, words) => (spellcheck ? spellcheck.check(words) : { misspelled: [] }));
   handle('spell:addWord', (_event, word) => (spellcheck ? spellcheck.addWord(word) : { ok: false }));
 
@@ -676,7 +691,26 @@ function registerAiStubs(): void {
     'ai:summarize:cancel': () => true,
     'ai:rewrite:start': () => AI_UNAVAILABLE,
     'ai:rewrite:cancel': () => true,
+    'ai:chat:start': () => AI_UNAVAILABLE,
+    'ai:chat:cancel': () => true,
+    // The built-in model's budget (aiIpc.ts LOCAL_CHAT_LIMITS, aiProtocol.ts TEXT_JOB_CONTEXT_TOKENS).
+    'ai:chat:limits': () => ({ contextTokens: 4096, maxOutputTokens: 1024, maxFileChars: 4500, local: true }),
     'ai:summaryCache:clear': () => ({ removed: 0 }),
+    'ai:learn:record': () => false,
+    'ai:learn:info': () => ({ enabled: false, lines: [AI_UNAVAILABLE.message] }),
+    'ai:learn:instructions': () => [],
+    'ai:learn:clear': () => ({ cleared: false }),
+    'ai:learn:details': () => ({
+      enabled: false,
+      features: { suggest: false, chat: false, rewrite: false, summary: false },
+      phrases: [],
+      wishes: [],
+      custom: { chat: '', grammar: '', restructure: '' },
+      learned: { chat: '', grammar: '', restructure: '' },
+    }),
+    'ai:learn:remove': () => false,
+    'ai:learn:setCustom': () => false,
+    'ai:learn:resetHints': () => ({ reset: false }),
     'ai:summarize:retryDefault': () => ({ ok: false, ...unavailableModel }),
     'ai:models:list': () => ({ ok: true, models: [] }),
     'ai:models:pull:cancel': () => true,

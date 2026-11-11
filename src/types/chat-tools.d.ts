@@ -28,6 +28,8 @@ interface CodePadChatAiOptions {
   /** Send the earlier turns of the conversation (answers only). */
   withHistory?: boolean;
   onDone(text: string, warnings: string[]): void;
+  /** Called instead of `onDone` when the request failed, was refused or was cancelled (a message was already shown). */
+  onFail?(): void;
 }
 
 /** The chat window and helpers a tool may use. Tools never touch the DOM of the window directly. */
@@ -59,6 +61,12 @@ interface CodePadChatServices {
   lfText(tab: CodePadTextTab): string;
   /** Sends a request to the model; the result arrives in `options.onDone`. */
   runAi(options: CodePadChatAiOptions): Promise<void>;
+  /** One request in a series: resolves the answer, or null when it failed or was cancelled (a message was already shown). */
+  runPart(options: Omit<CodePadChatAiOptions, 'onDone' | 'onFail'>): Promise<{ text: string; warnings: string[] } | null>;
+  /** The chat's scope setting: only the part of a long file the user sees, or all of it. */
+  scope(): 'visible' | 'all';
+  /** Adds a one-time Helpful / Not helpful rating row to an answer card while personal learning is on. */
+  addRating(card: HTMLElement, answer: string): void;
   /** Adds a question and its answer to the conversation history. */
   remember(question: string, answer: string): void;
 }
@@ -82,6 +90,8 @@ interface CodePadChatToolsApi {
   get(id: string): CodePadChatTool | undefined;
   /** In registration order. */
   list(): CodePadChatTool[];
+  /** Forgets the pending answer and other per-conversation state (New conversation / Clear chat). */
+  reset(): void;
 }
 
 interface Window {

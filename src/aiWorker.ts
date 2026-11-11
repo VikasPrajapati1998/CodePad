@@ -15,6 +15,7 @@ import type {
 } from 'node-llama-cpp' with { 'resolution-mode': 'import' };
 import * as prompts from './aiPrompts';
 import type { PromptSpec } from './aiPrompts';
+import { TEXT_JOB_CONTEXT_TOKENS } from './aiProtocol';
 import type { EngineInfo, WorkerMessage, WorkerRequest } from './aiProtocol';
 
 /** The node-llama-cpp module (an ES module, so it is only ever loaded with a dynamic import). */
@@ -112,7 +113,9 @@ process.env.NODE_LLAMA_CPP_LOG_LEVEL = 'error';
 // 2048 tokens hold header + scope + a 2000-char window + up to 128 generated tokens; the KV cache of Qwen3-0.6B costs
 // about 112 KiB per token (28 layers x 8 KV heads x 128 x 2 x 2 bytes), so this slot grows from ~112 MiB to ~224 MiB.
 const SUGGEST_CONTEXT = 2048;
-const SUMMARY_CONTEXT = 4096;
+const SUMMARY_CONTEXT = TEXT_JOB_CONTEXT_TOKENS;
+// Chat streaming: at most one partial-text message per interval, and only when the text grew.
+const PARTIAL_INTERVAL_MS = 150;
 const TRIM_STEP_TOKENS = 64;
 const SAFETY_TOKENS = 16;
 const MAX_RAW_CHARS = 40000;
@@ -232,13 +235,14 @@ function tokenizeSpec(spec: PromptSpec): Token[] {
  * Runs one completion on a long-lived sequence (the unchanged prefix is not re-evaluated).
  * Resolves `{text, stopReason}`; throws AbortError when `signal` aborts, E_PROMPT_TOO_LONG when the prompt does not fit
  * (or, with `trimToFit`, drops the oldest tokens in steps so the kept window stays stable).
+ * `onText` receives the whole text generated so far after each chunk (not after a detected loop).
  */
 async function complete(
   slot: Slot,
   spec: PromptSpec,
   genInput: UntrustedGen | null | undefined,
   signal: AbortSignal,
-  { trimToFit = false }: { trimToFit?: boolean } = {}
+  { trimToFit = false, onText }: { trimToFit?: boolean; onText?: (text: string) => void } = {}
 ): Promise<CompletionResult> {
   const gen = sanitizeGen(genInput);
   let tokens = tokenizeSpec(spec);
@@ -279,6 +283,8 @@ async function complete(
         if (guard?.loop) {
           cutAt = guard.cutAt;
           loop.abort();
+        } else if (cutAt === null) {
+          onText?.(text);
         }
       },
     });
@@ -462,8 +468,11 @@ async function handleSummarize({ id, text, name, style, chunkTokens, modelLabel 
   }
 }
 
+/** The optional learned style sentence: absent or a short string. */
+const isValidHint = (hint: unknown): boolean => hint === undefined || (typeof hint === 'string' && hint.length <= prompts.MAX_HINT_CHARS);
+
 /** Grammar check / rewrite of one text (rewriter.ts) on a fresh summary-sized context. */
-async function handleRewrite({ id, text, mode, instruction, languageId, chunkTokens, maxOutputTokens }: RewriteRequest): Promise<void> {
+async function handleRewrite({ id, text, mode, instruction, hint, languageId, chunkTokens, maxOutputTokens }: RewriteRequest): Promise<void> {
   const controller = startJob(id);
   let slot: Slot | null = null;
   try {
@@ -475,6 +484,7 @@ async function handleRewrite({ id, text, mode, instruction, languageId, chunkTok
       !REWRITE_MODES.has(mode) ||
       typeof instruction !== 'string' ||
       instruction.length > MAX_INSTRUCTION_CHARS ||
+      !isValidHint(hint) ||
       typeof languageId !== 'string' ||
       !LANGUAGE_ID.test(languageId) ||
       !Number.isInteger(chunkTokens) ||
@@ -493,6 +503,7 @@ async function handleRewrite({ id, text, mode, instruction, languageId, chunkTok
       text,
       mode,
       instruction,
+      hint,
       languageId,
       chunkTokens,
       maxOutputTokens,
@@ -518,7 +529,7 @@ async function handleRewrite({ id, text, mode, instruction, languageId, chunkTok
 }
 
 /** Chat request (chat.ts) on a fresh summary-sized context; the file is cut to the limits main computed. */
-async function handleChat({ id, instruction, fileName, fileText, history, output, limits }: ChatRequest): Promise<void> {
+async function handleChat({ id, instruction, hint, fileName, fileText, history, output, limits }: ChatRequest): Promise<void> {
   const controller = startJob(id);
   let slot: Slot | null = null;
   try {
@@ -527,6 +538,7 @@ async function handleChat({ id, instruction, fileName, fileText, history, output
       typeof instruction !== 'string' ||
       instruction.length === 0 ||
       instruction.length > MAX_CHAT_INSTRUCTION_CHARS ||
+      !isValidHint(hint) ||
       (fileName !== undefined && (typeof fileName !== 'string' || fileName.length > MAX_NAME_CHARS)) ||
       (fileText !== undefined && (typeof fileText !== 'string' || fileText.length > MAX_CHAT_CHARS)) ||
       !Array.isArray(history) ||
@@ -553,6 +565,7 @@ async function handleChat({ id, instruction, fileName, fileText, history, output
     send({ type: 'progress', id, phase: 'chat', current: 0, total: 1, markdown: null });
     const result = await chat.runChat({
       instruction,
+      hint,
       fileName,
       fileText,
       history,
@@ -560,7 +573,21 @@ async function handleChat({ id, instruction, fileName, fileText, history, output
       limits,
       signal: controller.signal,
       complete: async (spec, gen) => {
-        const { text: answer, stopReason, firstToken } = await complete(created, spec, gen, controller.signal);
+        let sentLength = 0;
+        let sentAt = 0;
+        const onText = (raw: string): void => {
+          const now = Date.now();
+          if (now - sentAt < PARTIAL_INTERVAL_MS) {
+            return;
+          }
+          const text = chat.partialChatText(raw);
+          if (text.length > sentLength) {
+            sentLength = text.length;
+            sentAt = now;
+            send({ type: 'partial', id, text });
+          }
+        };
+        const { text: answer, stopReason, firstToken } = await complete(created, spec, gen, controller.signal, { onText });
         if (answer.trim() === '') {
           throw Object.assign(new Error(`generation stopped by "${stopReason}" before any text (first token: ${JSON.stringify(firstToken ?? "none")})`), { code: 'E_EMPTY' });
         }

@@ -1951,6 +1951,17 @@
       cancelRewrite: ai.cancelRewrite,
       chat: ai.chat,
       cancelChat: ai.cancelChat,
+      chatLimits: ai.chatLimits,
+      learn: Object.freeze({
+        record: ai.learn.record,
+        info: ai.learn.info,
+        instructions: ai.learn.instructions,
+        clear: ai.learn.clear,
+        details: ai.learn.details,
+        remove: ai.learn.remove,
+        setCustom: ai.learn.setCustom,
+        resetHints: ai.learn.resetHints,
+      }),
       models: Object.freeze({
         list: ai.models.list,
         add: ai.models.add,
@@ -2164,6 +2175,8 @@
       create: (filePath, content) => api.files.create(filePath, content),
       rename: (filePath, newName) => api.files.rename(filePath, newName),
       trash: (filePath) => api.files.trash(filePath),
+      move: (filePath, destDir) => api.files.move(filePath, destDir),
+      mkdir: (parentDir, name) => api.files.mkdir(parentDir, name),
       recent: Object.freeze({
         list: async () => (await api.recent.list()).map(({ path, name }) => ({ path, name })),
         add: (filePath) => api.recent.add(filePath),

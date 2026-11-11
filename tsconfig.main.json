@@ -16,6 +16,7 @@
     "src/providers/**/*.ts",
     "src/shared/**/*.ts",
     "src/scripts/**/*.ts",
+    "src/tests/**/*.ts",
     "src/types/**/*.d.ts"
   ],
   "exclude": [

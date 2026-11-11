@@ -24,6 +24,8 @@ import { createModelManager } from './modelDownloader';
 import type { ModelLog, ModelStatus } from './modelDownloader';
 import { createEngine } from './aiEngine';
 import type { ChatOutcome, Engine, EngineProgress, EngineState, RewriteOutcome, SummaryOutcome } from './aiEngine';
+import { TEXT_JOB_CONTEXT_TOKENS } from './aiProtocol';
+import { createLearning } from './aiLearning';
 import { createSummaryCache } from './summaryCache';
 import type { SummaryCacheStore } from './summaryCache';
 import { createModelRegistry } from './modelRegistry';
@@ -103,11 +105,11 @@ export interface AiRewriteEvent {
 export interface AiChatEvent {
   type: 'chat';
   jobId: number;
-  /** loading | progress | consentRequired | modelFailed | done | error | cancelled. */
+  /** loading | progress | partial | consentRequired | modelFailed | done | error | cancelled. */
   phase: string;
   current?: number;
   total?: number;
-  /** Set with phase 'done'. */
+  /** Set with phase 'done' (cleaned answer) and 'partial' (raw text generated so far, local models only). */
   text?: string;
   /** Set with phase 'done': notes for the user, for example that only an excerpt of the file was read. */
   warnings?: string[];
@@ -116,6 +118,14 @@ export interface AiChatEvent {
   label?: string;
   code?: string;
   message?: string;
+}
+
+/** What the active chat model can take (`ai:chat:limits`). */
+export interface AiChatLimits {
+  contextTokens: number;
+  maxOutputTokens: number;
+  maxFileChars: number;
+  local: boolean;
 }
 
 /** Fields of a job event (summary, rewrite or chat) without the discriminant and the job id. */
@@ -235,10 +245,14 @@ interface ProbeResult {
 
 interface RewriteParams extends RewriteRequestData {
   target: SummaryTarget;
+  /** Learned style sentence for the prompt ('' when none; made in main, never taken from the renderer). */
+  hint: string;
 }
 
 interface ChatParams extends ChatRequestData {
   target: SummaryTarget;
+  /** Learned style sentence for the prompt ('' when none; made in main, never taken from the renderer). */
+  hint: string;
 }
 
 /** How a text job runs on a model: the engine call of a local model and the provider call of a remote one. */
@@ -516,6 +530,7 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
   const modelsDir = path.join(userDataDir, 'models');
   const secrets = createSecretStore({ userDataDir, safeStorage, log });
   const registry = createModelRegistry({ userDataDir, secretStore: secrets, integrity, log });
+  const learning = createLearning({ userStore, getSettings, log });
 
   let suggestion: { reqId: number; controller: AbortController } | null = null;
   let textJob: TextJobState | null = null;
@@ -796,7 +811,7 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
 
   function rewriteRunner(job: TextJobState, params: RewriteParams): TargetRunner<RewriteOutcome> {
     const { signal } = job.controller;
-    const common = { text: params.text, mode: params.mode, instruction: params.instruction, languageId: params.languageId };
+    const common = { text: params.text, mode: params.mode, instruction: params.instruction, languageId: params.languageId, hint: params.hint };
     return {
       onEngine: (target) =>
         target.rewrite(
@@ -824,9 +839,39 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
     };
   }
 
+  /** Largest file text a remote chat request passes on, from the model's context size. */
+  const remoteChatFileChars = (contextTokens: number): number =>
+    clamp(contextTokens * REMOTE_CHAT_CHARS_PER_TOKEN, ...REMOTE_CHAT_FILE_RANGE, REMOTE_CHAT_FILE_RANGE[0]);
+
+  /**
+   * The budget of the model a chat job started now would use (see pickTarget). Local models (built-in or a second
+   * engine) always run in the worker's text-job context, whatever the registry says.
+   * @returns Context and answer size in tokens, the file text limit and whether the model is local.
+   */
+  function chatLimits(): AiChatLimits {
+    const local: AiChatLimits = {
+      contextTokens: TEXT_JOB_CONTEXT_TOKENS,
+      maxOutputTokens: LOCAL_CHAT_LIMITS.maxTokens,
+      maxFileChars: LOCAL_CHAT_LIMITS.maxFileChars,
+      local: true,
+    };
+    const target = pickTarget();
+    if (target.kind !== 'remote') {
+      return local;
+    }
+    try {
+      // The public entry (pickTarget's own source), so no API key is decrypted just to read a number.
+      const { contextTokens } = registry.getActive();
+      return { contextTokens, maxOutputTokens: REMOTE_CHAT_OUTPUT_TOKENS, maxFileChars: remoteChatFileChars(contextTokens), local: false };
+    } catch (error) {
+      log.warn(`Could not read the chat model limits: ${errorFields(error).code || 'error'}`);
+      return local;
+    }
+  }
+
   function chatRunner(job: TextJobState, params: ChatParams): TargetRunner<ChatOutcome> {
     const { signal } = job.controller;
-    const common = { instruction: params.instruction, fileName: params.fileName, fileText: params.fileText, history: params.history, output: params.output };
+    const common = { instruction: params.instruction, fileName: params.fileName, fileText: params.fileText, history: params.history, output: params.output, hint: params.hint };
     return {
       onEngine: (target) =>
         target.chat(
@@ -840,14 +885,21 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
                 emitJob(job, { phase: 'progress', current: progress.current, total: progress.total });
               }
             },
+            // Streamed answer text goes to the renderer only; it is never logged.
+            onPartial: (text) => {
+              if (!signal.aborted) {
+                emitJob(job, { phase: 'partial', text });
+              }
+            },
           }
         ),
+      // Remote providers answer in one response (no streaming).
       onProvider: (provider, runtime) => {
         emitJob(job, { phase: 'progress', current: 0, total: 1 });
         return chat.runChat({
           ...common,
           limits: {
-            maxFileChars: clamp(runtime.contextTokens * REMOTE_CHAT_CHARS_PER_TOKEN, ...REMOTE_CHAT_FILE_RANGE, REMOTE_CHAT_FILE_RANGE[0]),
+            maxFileChars: remoteChatFileChars(runtime.contextTokens),
             maxHistoryChars: REMOTE_CHAT_HISTORY_CHARS,
             maxTokens: REMOTE_CHAT_OUTPUT_TOKENS,
           },
@@ -1041,14 +1093,32 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
       suggestion.controller.abort();
       suggestion = null;
     }
-    if (getSettings()['ai.enabled'] !== true || textJob || manager.status().state !== 'ready') {
+    if (getSettings()['ai.enabled'] !== true || textJob) {
+      return none;
+    }
+    // A phrase the user accepted here before is offered at once, without asking the model.
+    const recalled = learning.recall(request.languageId, request.prefix);
+    if (recalled !== null && (request.multiline || !recalled.includes('\n'))) {
+      learning.remember(request.reqId, request.languageId, request.prefix, recalled);
+      return { reqId: request.reqId, text: recalled };
+    }
+    if (manager.status().state !== 'ready') {
       return none;
     }
     const current = { reqId: request.reqId, controller: new AbortController() };
     suggestion = current;
     try {
-      const result = await engine.suggest(request, current.controller.signal);
-      return current.controller.signal.aborted ? none : { reqId: request.reqId, text: result.text };
+      const result = await engine.suggest({ ...request, tokenScale: learning.suggestTokenScale() }, current.controller.signal);
+      if (current.controller.signal.aborted) {
+        return none;
+      }
+      if (result.text !== null && learning.shouldSuppress(request.languageId, request.prefix, result.text)) {
+        return none;
+      }
+      if (result.text !== null) {
+        learning.remember(request.reqId, request.languageId, request.prefix, result.text);
+      }
+      return { reqId: request.reqId, text: result.text };
     } catch (error) {
       if (!current.controller.signal.aborted) {
         log.warn(`AI suggestion failed: ${errorFields(error).code || 'error'}`);
@@ -1081,7 +1151,13 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
       return { busy: true };
     }
     const configuredStyle = settings['ai.summaryStyle'];
-    const style: SummaryStyle = isSummaryStyle(configuredStyle) ? configuredStyle : 'both';
+    const style: SummaryStyle =
+      configuredStyle === 'auto'
+        ? (learning.preferredSummaryStyle() ?? 'both')
+        : isSummaryStyle(configuredStyle)
+          ? configuredStyle
+          : 'both';
+    learning.noteSummaryStyle(style);
     const chunkTokens = clamp(settings['ai.chunkTokens'], ...CHUNK_TOKENS_RANGE, DEFAULT_CHUNK_TOKENS);
     const cacheEnabled = settings['ai.summaryCache'] !== false;
 
@@ -1142,7 +1218,7 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
     if (suggestion) {
       suggestion.controller.abort();
     }
-    runRewrite(job, { ...request, target });
+    runRewrite(job, { ...request, target, hint: learning.rewriteHint(request.mode) });
     return { ok: true, jobId: job.jobId };
   });
   handle('ai:rewrite:cancel', (_event, jobId) => {
@@ -1166,9 +1242,10 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
     if (suggestion) {
       suggestion.controller.abort();
     }
-    runChatJob(job, { ...request, target });
+    runChatJob(job, { ...request, target, hint: request.output === 'answer' ? learning.chatHint() : '' });
     return { ok: true, jobId: job.jobId };
   });
+  handle('ai:chat:limits', () => chatLimits());
   handle('ai:chat:cancel', (_event, jobId) => {
     if (textJob && textJob.kind === 'chat' && typeof jobId === 'number' && Number.isSafeInteger(jobId) && textJob.jobId === jobId) {
       textJob.controller.abort();
@@ -1176,6 +1253,43 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
     return true;
   });
   handle('ai:summaryCache:clear', async () => ({ removed: await cache.clear() }));
+  handle('ai:learn:record', (_event, raw) => {
+    learning.record(raw);
+    return true;
+  });
+  handle('ai:learn:info', () => learning.info());
+  handle('ai:learn:instructions', () => learning.instructions());
+  handle('ai:learn:details', () => learning.details());
+  handle('ai:learn:remove', (_event, kind, index, text) =>
+    (kind === 'phrase' || kind === 'wish') && typeof index === 'number' && typeof text === 'string' ? learning.remove(kind, index, text) : false
+  );
+  handle('ai:learn:setCustom', (_event, key, text) =>
+    (key === 'chat' || key === 'grammar' || key === 'restructure') && typeof text === 'string' ? learning.setCustom(key, text) : false
+  );
+  handle('ai:learn:resetHints', async (event) => {
+    const confirmed = await confirmNative(event.sender, {
+      title: 'Reset learned hints',
+      message: 'Forget the ratings and Apply/discard counts the AI uses for its style hints?',
+      detail: 'Remembered ghost-text phrases and restructure wishes are kept. Your own sentences are kept too.',
+      confirm: 'Reset',
+    });
+    if (confirmed) {
+      learning.resetHints();
+    }
+    return { reset: confirmed };
+  });
+  handle('ai:learn:clear', async (event) => {
+    const confirmed = await confirmNative(event.sender, {
+      title: 'Erase learned AI data',
+      message: 'Erase everything the AI has learned about how you work?',
+      detail: 'Remembered ghost-text phrases, answer and rewrite feedback and the style hints derived from them are deleted. This cannot be undone.',
+      confirm: 'Erase',
+    });
+    if (confirmed) {
+      await learning.clear();
+    }
+    return { cleared: confirmed };
+  });
 
   handle('ai:summarize:retryDefault', (_event, jobId) => {
     const waiter = textJob && textJob.jobId === jobId ? textJob.waiter : null;
@@ -1497,7 +1611,7 @@ export function registerAiIpc({ handle, send, getSettings, userDataDir, appVersi
         await localEngine.dispose().catch((error: unknown) => log.warn(`Could not stop the model process: ${messageOf(error)}`));
       }
       stopListening.forEach((stop) => stop());
-      const results = await Promise.allSettled([cache.flush(), engine.dispose(), manager.dispose()]);
+      const results = await Promise.allSettled([cache.flush(), learning.flush(), engine.dispose(), manager.dispose()]);
       for (const result of results) {
         if (result.status === 'rejected') {
           log.warn(`AI shutdown step failed: ${errorFields(result.reason).message}`);

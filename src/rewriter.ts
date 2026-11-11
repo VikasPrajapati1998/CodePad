@@ -8,6 +8,7 @@
  * (or whose model call failed) keeps its original text, and the reason is returned as a warning. No chunk is dropped.
  */
 import * as extract from './docExtract';
+import { withHint } from './aiPrompts';
 import type { BuiltPrompt, ChatSpec } from './aiPrompts';
 import type { CompleteFn } from './summarizer';
 
@@ -48,6 +49,8 @@ export interface RewriteJob {
   mode: RewriteMode;
   /** Restructure only: the user's wish about the structure (at most 500 characters). */
   instruction?: string;
+  /** Learned style sentence made in main from the user's feedback (may be empty). */
+  hint?: string;
   languageId: string;
   /** Target chunk size in tokens (estimated with docExtract.estimateTokens). */
   chunkTokens: number;
@@ -232,6 +235,7 @@ export interface RewritePromptInput {
   mode: RewriteMode;
   chunk: string;
   instruction?: string;
+  hint?: string;
   languageId: string;
   /** 1-based part and the number of parts when the text was cut into several. */
   part?: { index: number; total: number };
@@ -248,7 +252,7 @@ export type RewriteRetry = 'unchanged' | 'lossy' | 'empty';
  * @param input Mode, chunk and context.
  * @returns Chat spec and generation options (deterministic, no repetition penalty so text is copied faithfully).
  */
-export function buildRewritePrompt({ mode, chunk, instruction, languageId, part, maxTokens, retry }: RewritePromptInput): BuiltPrompt<ChatSpec> {
+export function buildRewritePrompt({ mode, chunk, instruction, hint, languageId, part, maxTokens, retry }: RewritePromptInput): BuiltPrompt<ChatSpec> {
   const code = !PROSE_LANGUAGES.has(languageId);
   // After an empty answer: a short system prompt, since a long one may be what the small model could not answer.
   let system =
@@ -261,6 +265,9 @@ export function buildRewritePrompt({ mode, chunk, instruction, languageId, part,
         : RESTRUCTURE_SYSTEM;
   if (code && retry !== 'empty') {
     system += CODE_RULE.replace('LANGUAGE', languageId);
+  }
+  if (retry !== 'empty') {
+    system = withHint(system, hint);
   }
   if (part && part.total > 1) {
     system += ` This is part ${part.index} of ${part.total} of a longer document: process only this part and add no title, summary or conclusion.`;
@@ -478,6 +485,7 @@ export async function rewrite({
   text,
   mode,
   instruction,
+  hint,
   languageId,
   chunkTokens,
   maxOutputTokens,
@@ -525,6 +533,7 @@ export async function rewrite({
         mode,
         chunk: core,
         instruction,
+        hint,
         languageId,
         part: chunks.length > 1 ? { index: partIndex, total: chunks.length } : undefined,
         maxTokens,

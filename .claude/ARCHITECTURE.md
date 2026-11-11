@@ -24,7 +24,8 @@ CodePad/
 ├── modelDownloader.js  # Only network code: pinned model catalog (URLs, sizes, SHA-256), resumable download via Electron net, verification, userData/models, connectivity check
 ├── aiEngine.js         # Supervises the AI utility process (lazy start, idle unload, crash recovery, suggestion cache)
 ├── aiWorker.js         # Utility-process entry: node-llama-cpp (network kill-switch), suggestions and the summary pipeline
-├── spellcheck.js       # Custom English spell checker (main): word list lookup, contraction/hyphen rules, Damerau-Levenshtein suggestions, personal words; no AI, no library
+├── spellcheck.js       # Offline English spell checker (main): nspell + dictionary-en (Hunspell en_US), hyphen rule, personal words in userData/spell-words.json
+├── grammarOnline.js    # Online grammar service (main): native consent once per session, calls providers/languagetool.js; `grammar:check` channel
 ├── dictionaries/       # en.txt (SCOWL word list, most common first) + LICENSE-SCOWL.txt, copied to dist/ by the build
 ├── chat.js             # Chat assistant job: prompt/excerpt/answer cleaning for the active summary model (never logged)
 ├── chatFiles.js        # files:create / files:rename / files:trash inside the approved folder; native Yes/No before trashing
@@ -38,6 +39,7 @@ CodePad/
 ├── docExtract.js       # Pure, non-AI document extraction: sections, facts (dates, numbers, links), chunking, number verification
 ├── summarizer.js       # Map/reduce summary pipeline with an injected complete() and number verification
 ├── summaryCache.js     # LRU cache of finished summaries in userData/summary-cache.json
+├── aiLearning.js       # Opt-in personal learning: signed userData/ai-learning.json, phrase recall, suppression, prompt hints, summary format preference
 ├── NOTICE              # Shipped third-party notices (model, engine, dependencies)
 ├── build/
 │   ├── installer.nsh           # NSIS hooks: internet probe before install, CodePad.exe --install-model, model removal on uninstall
@@ -45,12 +47,16 @@ CodePad/
 │   └── linux/deb-preinst.sh    # .deb pre-install internet check
 ├── assets/
 │   └── icon.png        # App icon (1024x1024); window icon and electron-builder source for .ico/.icns/Linux icons
+├── tests/              # node:test suites (`npm test` builds, then runs dist/tests/**/*.test.js); excluded from the installers
 ├── scripts/
 │   └── afterPack.js    # electron-builder hook: asserts the packaged AI engine files, flips Electron fuses (RunAsNode, NODE_OPTIONS, --inspect off)
 ├── shared/             # UMD files loaded by main (require) and by the renderer (script tag)
 │   ├── settingsSchema.js   # Settings keys, types, ranges, defaults and the Monaco option each maps to; validate/sanitize
 │   ├── suggestText.js      # Pure UMD (main + renderer): ghost-text context extraction (header, enclosing scope, paragraph, suffix) and deterministic sentence/statement-complete trimming
-│   ├── chatIntent.js       # Pure UMD: deterministic intent parser of the AI chat (edit/create/extract/rename/delete/save/read/chat)
+│   ├── chatIntent.js       # Pure UMD: deterministic intent parser of the AI chat (edit, insert-at, analyze, outline, duplicates, translate, move/folder, multi-step, follow-ups, file ops)
+│   ├── docModel.js         # Pure UMD `CodePadDocModel`: blocks with stable ids, sections, places named in words (parseRef/resolve), outline
+│   ├── docOps.js           # Pure UMD `CodePadDocOps`: structured, version-checked, atomic document operations; line diff and partial apply of accepted hunks
+│   ├── chunker.js          # Pure UMD `CodePadChunker`: token estimate, model budget, heading/paragraph/sentence-aware chunks with overlap, merge
 │   ├── searchCore.js       # Pure search/replace engine (extended mode, whole word, regex) shared by Find in Files and tab search
 │   └── commands/           # Static command tables: id, title, menu path, order, accelerator, when. Main builds the menu from them
 │       ├── core.commands.js    # File/Edit/View items of the shell, Window and Help roles
@@ -68,6 +74,7 @@ CodePad/
 │   │   ├── commands.js     # window.CodePadCommands: register/execute/list/onExecute; adds every command to Monaco's palette
 │   │   ├── settings.js     # window.CodePadSettings: synchronous cache over the main-owned settings store
 │   │   ├── themes.js       # window.CodePadThemes: theme registry (dark/light built in; others defined in Monaco as cp-<id>)
+│   │   ├── versions.js     # window.CodePadVersions: in-memory per-tab version snapshots (max 30), taken before every AI apply
 │   │   ├── ui.js           # window.CodePadUI: modal, prompt, confirm, pick, contextMenu, output
 │   │   ├── panels.js       # window.CodePadPanels: left sidebar tab strip + bottom panel host, resizers, badges
 │   │   ├── features.js     # window.CodePadFeatures: register/initAll for the feature modules
@@ -83,7 +90,7 @@ CodePad/
 │       ├── text-tools.js, column-editor.js, clipboard-history.js, converters.js, hashes.js, text-tools.css   # Text tools, converters, hashes, output panel
 │       ├── view.js, encoding.js, themes.js, outline.js, settings-panel.js, view.css, themes.css   # View toggles, encoding/EOL pickers, extra themes, outline, settings dialog
 │       ├── tabs.js, files.js, sessions.js, compare.js, macros.js, tabs.css, compare.css   # Tab menu/pins/colors, reload/watch/autosave/recent, named sessions, diff view, macros
-│       └── ai-model.js, ai-models.js (Manage Models dialog), ai-rewrite.js (Check Grammar / Rewrite with diff preview and Apply), ai-chat.js + ai-chat.css (floating draggable chat icon and pop-up, AI job plumbing, dispatch), ai-chat-tools.js (the chat tool registry `CodePadChatTools`: edit-file, create-file, extract-to-file, answer, append-content, find-replace, remove-tags, transform-content, write-content, summarize-content, cancel-summary, clear-summary-cache, rename-file, delete-file, save-file, read-file, duplicate-file, list-files, open-file, close-file), spellcheck.js (squiggles and quick fixes), autosuggest.js, ai-suggest.js, ai-summary.js, ai.css   # AI status/download/gate, word dropdown, ghost text, summaries (load in this order)
+│       └── ai-model.js, ai-models.js (Manage Models dialog), ai-rewrite.js (Check Grammar / Rewrite with diff preview and Apply), ai-chat.js + ai-chat.css (floating draggable chat icon and pop-up, AI job plumbing, dispatch), ai-chat-tools.js (the chat tool registry `CodePadChatTools`: edit-file, create-file, extract-to-file, answer, append-content, find-replace, remove-tags, transform-content, write-content, summarize-content, cancel-summary, clear-summary-cache, rename-file, delete-file, save-file, read-file, duplicate-file, list-files, open-file, close-file), spellcheck.js (squiggles and quick fixes), autosuggest.js, ai-suggest.js, ai-summary.js, ai-learning.js (learning on/off, manage, erase commands and dialog), versions.js (File > Save Version / Version History: restore in one undo step, compare in the diff view), grammar-online.js (AI > Check Grammar Online: LanguageTool findings as squiggles and quick fixes), ai.css   # AI status/download/gate, word dropdown, ghost text, summaries (load in this order)
 ├── vendor/
 │   ├── xlsx-0.20.3.tgz # Official SheetJS CE release, installed as a file: dependency
 │   └── nlc-stub/       # Empty package that npm overrides substitute for unused node-llama-cpp GPU/arch packages

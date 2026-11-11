@@ -16,6 +16,10 @@ Dependency versions are pinned exactly; `npm install` creates `package-lock.json
 
 Document editing libraries (all pinned): `pdfjs-dist` 6.4.299 (ESM + module worker, loaded locally), `@cantoo/pdf-lib` 2.11.1, `@pdf-lib/fontkit` 1.1.1, `mammoth` 1.13.0, `docx` 9.14.0 and SheetJS `xlsx` 0.20.3. SheetJS is installed from the vendored `vendor/xlsx-0.20.3.tgz` (`file:` dependency) because npm's `xlsx` package is stuck at a vulnerable 0.18.5 and remote tarballs are disabled in this npm config. Packaging picks the needed library files through `build.files`; the installer grows by roughly 8 MB.
 
+Tests: `npm test` builds and runs the `src/tests/*.test.ts` suites with Node's built-in runner (`node --test`, no extra dependency). They are offline and deterministic and cover the document model, operations, chunker, chat intents, chat text shaping, personal learning and the grammar response parser.
+
+Spelling: `nspell` 2.1.5 and `dictionary-en` 4.0.0 (both pinned; `is-buffer` comes with nspell) provide the offline spell check. dictionary-en is ES-module only, so `spellcheck.ts` reads its `index.aff`/`index.dic` with fs; the files are listed in `build.files`. Run `npm install` after pulling this change.
+
 Encodings: `iconv-lite` 0.7.3 (pinned) powers the non-Unicode encodings. It is used only by the main process and the search worker, and it needs `node_modules/iconv-lite/**` and `node_modules/safer-buffer/**` in `build.files` (already listed, together with `shared/**` and the main-side modules).
 
 Local AI: `node-llama-cpp` 3.22.1 (pinned) runs Qwen3-0.6B in an Electron utility process. Its prebuilt engine packages (`@node-llama-cpp/win-x64`, `mac-arm64-metal`, `mac-x64`, `linux-x64`; CPU, plus Metal on Apple Silicon) are N-API addons, so no Electron rebuild is needed (`build.npmRebuild: false`). Nothing is built or downloaded at install or run time:

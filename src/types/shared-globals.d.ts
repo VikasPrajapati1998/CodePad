@@ -66,8 +66,17 @@ type SettingsValues = {
   'ai.threads': number;
   'ai.unloadAfterMinutes': number;
   'ai.multiline': boolean;
-  /** 'both' | 'paragraph' | 'bullets'. */
+  /** 'both' | 'paragraph' | 'bullets' | 'auto' (the format the user rates best while 'ai.learning' is on). */
   'ai.summaryStyle': string;
+  /** What the chat reads and edits of a long file: 'visible' (the selection, else the lines on screen) or 'all' (the whole file, part by part). */
+  'ai.chatScope': string;
+  /** Opt-in: the AI remembers how this user reacts and adapts (data stays on this computer). */
+  'ai.learning': boolean;
+  /** Per-feature switches under 'ai.learning': ghost text, chat, grammar/restructure, summaries. */
+  'ai.learning.suggest': boolean;
+  'ai.learning.chat': boolean;
+  'ai.learning.rewrite': boolean;
+  'ai.learning.summary': boolean;
   'ai.summaryMaxChars': number;
   'ai.chunkTokens': number;
   'ai.summaryCache': boolean;

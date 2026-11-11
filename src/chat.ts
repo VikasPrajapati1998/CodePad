@@ -73,6 +73,31 @@ function fitHistory(history: ChatTurn[], maxChars: number): ChatTurn[] {
 }
 
 /**
+ * Gives a one-block text the paragraph count the request named: a small model often writes everything on one line.
+ * Only a text without any line break is regrouped (sentence by sentence); text that already has structure is kept.
+ * @param text Cleaned model text.
+ * @param instruction The user's request.
+ * @returns The text, in paragraphs separated by one blank line when the request asked for several.
+ */
+export function shapeParagraphs(text: string, instruction: string): string {
+  const { paragraphs } = prompts.requestedShape(instruction);
+  const body = text.trim();
+  if (paragraphs === null || paragraphs < 2 || /\n/.test(body)) {
+    return text;
+  }
+  const sentences = body.split(/(?<=[.!?])\s+/).filter((sentence) => sentence !== '');
+  if (sentences.length < paragraphs) {
+    return text;
+  }
+  const size = Math.ceil(sentences.length / paragraphs);
+  const groups: string[] = [];
+  for (let index = 0; index < sentences.length; index += size) {
+    groups.push(sentences.slice(index, index + size).join(' '));
+  }
+  return `${groups.join('\n\n')}${text.endsWith('\n') ? '\n' : ''}`;
+}
+
+/**
  * Cleans a model answer: drops reasoning blocks and control tokens and, for a whole file, a code fence around it.
  * @param raw Model output.
  * @param output What the answer should be.
@@ -88,6 +113,16 @@ export function cleanChatAnswer(raw: string, output: ChatOutput): string {
   return text.trim();
 }
 
+/**
+ * The text of an answer still being generated, for streaming: reasoning blocks (also an unfinished one) and control
+ * tokens are dropped; nothing else is changed.
+ * @param raw Model output so far.
+ * @returns The text to show while the answer grows.
+ */
+export function partialChatText(raw: string): string {
+  return raw.replace(THINK_BLOCK, '').replace(THINK_OPEN, '').replace(SPECIAL_TOKEN, '');
+}
+
 const codeOf = (error: unknown): string | undefined =>
   typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string'
     ? (error as { code: string }).code
@@ -100,7 +135,7 @@ const codeOf = (error: unknown): string | undefined =>
  * @returns The cleaned text and warnings.
  * @throws {Error} `E_ABORTED` when cancelled; `E_EMPTY` when the model produced no text; the primitive's own errors.
  */
-export async function runChat({ instruction, fileName, fileText, history, output, limits, complete, signal }: ChatJob): Promise<ChatResult> {
+export async function runChat({ instruction, hint, fileName, fileText, history, output, limits, complete, signal }: ChatJob): Promise<ChatResult> {
   const warnings: string[] = [];
   let fileChars = limits.maxFileChars;
   for (let attempt = 1; ; attempt += 1) {
@@ -109,7 +144,7 @@ export async function runChat({ instruction, fileName, fileText, history, output
     }
     const shown = fileText === undefined ? undefined : excerpt(fileText, fileChars);
     const { spec, gen } = prompts.buildChatPrompt(
-      { instruction, fileName, fileText: shown, history: fitHistory(history, limits.maxHistoryChars), output },
+      { instruction, hint, fileName, fileText: shown, history: fitHistory(history, limits.maxHistoryChars), output },
       limits.maxTokens,
     );
     try {
@@ -117,7 +152,7 @@ export async function runChat({ instruction, fileName, fileText, history, output
       if (fileText !== undefined && shown !== fileText) {
         warnings.push('The file is longer than the model can read, so only its start and end were used.');
       }
-      const text = cleanChatAnswer(raw, output);
+      const text = shapeParagraphs(cleanChatAnswer(raw, output), instruction);
       if (text === '') {
         throw Object.assign(new Error('The model returned no text.'), { code: 'E_EMPTY' });
       }
