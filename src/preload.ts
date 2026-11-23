@@ -23,7 +23,7 @@ declare const window: {
   addEventListener(type: 'drop', listener: (event: DropEventLike) => void, useCapture: boolean): void;
 };
 
-// Main only approves dropped paths it was told about here: a trusted (user-made) drop event cannot be forged by page script.
+// Real paths of a genuine user drop are reported to main, which approves and opens them: a trusted (user-made) drop event cannot be forged by page script, and a File object cannot cross the context bridge.
 window.addEventListener(
   'drop',
   (event) => {
@@ -32,7 +32,7 @@ window.addEventListener(
     }
     const paths = Array.from(event.dataTransfer.files, (file) => webUtils.getPathForFile(file)).filter((p) => p.length > 0);
     if (paths.length > 0) {
-      ipcRenderer.send('fs:dropIntent', paths);
+      ipcRenderer.send('fs:dropped', paths);
     }
   },
   true,
@@ -55,12 +55,6 @@ const api: CodePadApi = {
   reveal: invoke('shell:reveal'),
   saveSession: invoke('session:save'),
   loadSession: invoke('session:load'),
-  /** Grants access to a dropped File object (only real, user-dropped files have a path). */
-  approveDropped: async (file: File) => {
-    const filePath = webUtils.getPathForFile(file);
-    await ipcRenderer.invoke('fs:approveDropped', filePath);
-    return filePath;
-  },
   approveClose: () => ipcRenderer.send('app:closeApproved'),
   cancelClose: () => ipcRenderer.send('app:closeCancelled'),
   /** Tells main the session restore finished, so queued command-line files can be opened. */

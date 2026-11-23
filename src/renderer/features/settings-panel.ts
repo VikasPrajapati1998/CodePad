@@ -83,7 +83,7 @@
     'ai.unloadAfterMinutes': ['Unload the model after idle minutes', 'Frees memory when AI is not used. 0 keeps it loaded.'],
     'ai.multiline': ['Allow multi-line suggestions', ''],
     'ai.summaryStyle': ['Summary format', 'Overview paragraph, bullet points, or both. "auto" uses the format you rate best while AI learning is on.'],
-    'ai.chatScope': ['Chat works on', 'Visible part: the selection, or else the lines on screen (best for long files). Whole file: every part of the file is processed in turn, which takes longer. Also in the chat header.'],
+    'ai.chatScope': ['Chat reading scope', 'What the chat reads when you ask a question or an analysis and nothing is selected. Visible part: the lines on screen (best for long files). Whole file: every part is read in turn, which takes longer. A selection always wins, and edits only ever change the selected text in Edit Mode. Also in the chat header.'],
     'ai.learning': ['Learn from my usage (AI personalization)', 'The AI remembers which suggestions you accept, how you rate chat answers and summaries, and what you apply or discard in rewrites, and adapts to them. Stored only on this computer; see AI > Manage Learned Data and AI > Erase Learned Data.'],
     'ai.learning.suggest': ['Learn from ghost text', 'Needs "Learn from my usage". Remembers accepted phrases and drops suggestions you keep ignoring.'],
     'ai.learning.chat': ['Learn from chat ratings', 'Needs "Learn from my usage". Uses your thumbs up/down to adapt the length of answers.'],

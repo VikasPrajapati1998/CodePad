@@ -5,6 +5,9 @@
 // clicks Apply; nothing is overwritten, and a version is kept (CodePadVersions) before every AI change is applied.
 // The model never edits a document: it returns text, the tools build CodePadDocOps operations, validate them against
 // the text they were planned on and show the result. Document text is sent as data, never as instructions.
+// Read Mode / Edit Mode: answers, summaries, analysis and every file operation work in both modes (they read the selection
+// when there is one, else the file). A content change works only in Edit Mode and only on the selected text (`editScope`):
+// the planning runs on the selected text and the proposal replaces exactly that range.
 // All dynamic text is set with textContent.
 (() => {
   const READ_LINES = 40;
@@ -135,7 +138,67 @@
     return { start: lfOffset(s, tab.model, selection.getStartPosition()), end: lfOffset(s, tab.model, selection.getEndPosition()) };
   }
 
+  /** The selected text of a tab shown in the editor (LF), else undefined: reading tools use it before the whole file. */
+  function selectedText(s: CodePadChatServices, tab: CodePadTextTab): string | undefined {
+    const selected = selectionOffsets(s, tab);
+    return selected ? s.lfText(tab).slice(selected.start, selected.end) : undefined;
+  }
+
+  /**
+   * What a content change works on: in Edit Mode only the selected text. The planning (document model, chunks,
+   * operations) runs on `text`; the result replaces exactly `start`..`end` of `full`.
+   */
+  interface EditScope {
+    tab: CodePadTextTab;
+    /** LF text of the whole file when the request was made (the proposal is checked against it before it is applied). */
+    full: string;
+    start: number;
+    end: number;
+    /** The selected text. */
+    text: string;
+    /** The cursor as an offset inside `text`, or undefined when it is outside the selection. */
+    cursor: number | undefined;
+  }
+
+  function scopeOf(s: CodePadChatServices, tab: CodePadTextTab, selected: { start: number; end: number }): EditScope {
+    const full = s.lfText(tab);
+    const cursor = cursorOffset(s, tab);
+    return {
+      tab,
+      full,
+      start: selected.start,
+      end: selected.end,
+      text: full.slice(selected.start, selected.end),
+      cursor: cursor !== undefined && cursor >= selected.start && cursor <= selected.end ? cursor - selected.start : undefined,
+    };
+  }
+
+  const NEEDS_SELECTION = 'In Edit Mode I only change the selected text.';
+
+  /**
+   * The scope of a content change for the file the intent names: the file must be in Edit Mode (else the Read Mode
+   * notice is shown) and have a selection (else the user is told to select first). Null after saying why.
+   */
+  function editScope(s: CodePadChatServices, intent: CodePadChatIntent): EditScope | null {
+    const tab = s.resolveTextTab(intent, true);
+    if (!tab) {
+      return null;
+    }
+    const selected = selectionOffsets(s, tab);
+    if (!selected) {
+      s.bot(`${NEEDS_SELECTION} Select the text in ${tab.name} that should change, then ask again.`);
+      return null;
+    }
+    return scopeOf(s, tab, selected);
+  }
+
   const parseDoc = (tab: CodePadTextTab, text: string): CodePadDocument => CodePadDocModel.parse(text, tab.model.getLanguageId());
+
+  /** `text` with `added` after it, starting on a new line. */
+  function appendTo(text: string, added: string): string {
+    const base = text === '' || text.endsWith('\n') ? text : `${text}\n`;
+    return base + added;
+  }
 
   /** The limits of the active model, or safe defaults when they cannot be read. */
   async function chatLimits(s: CodePadChatServices): Promise<CpAiChatLimits> {
@@ -352,6 +415,19 @@
     const card = s.addCard(`Proposed edit of ${CodePadSearchCore.displayName(tab.name)}`, body, actions, true);
   }
 
+  /**
+   * Proposes a new text for the selected part only: the rest of the file stays as it is and Apply refuses when the
+   * file changed since the request. The selection's own trailing white space is kept, so the next line is not joined.
+   */
+  function proposeScoped(s: CodePadChatServices, scope: EditScope, text: string, warnings: string[], note: string | undefined, label: string): void {
+    const trailing = /\s*$/.exec(scope.text)?.[0] ?? '';
+    const replacement = text.trim() === '' ? text : text.replace(/\s+$/, '') + trailing;
+    const firstLine = scope.full.slice(0, scope.start).split('\n').length;
+    const lastLine = scope.full.slice(0, scope.end).split('\n').length;
+    const where = `Only the selected text (${firstLine === lastLine ? `line ${firstLine}` : `lines ${firstLine} to ${lastLine}`}) is changed.`;
+    proposeEdit(s, scope.tab, scope.full, scope.full.slice(0, scope.start) + replacement + scope.full.slice(scope.end), warnings, note ? `${where} ${note}` : where, label);
+  }
+
   /** Options of a new-file card. */
   interface NewFileProposal {
     title: string;
@@ -427,24 +503,26 @@
   }
 
   /**
-   * Shows an answer with its actions: Insert at cursor (one undo step), Append to document / Replace entire document
-   * (through a diff card), Replace selection (when there is one), Copy, Regenerate, Shorten / Expand / Continue
-   * (revise this answer), Discard and Revert. Without an open text file Insert opens the text in a new untitled tab.
+   * Shows an answer with its actions: Insert after selection / Replace selection (one undo step each, Edit Mode and a
+   * selection needed; nothing else of the file is touched), Copy, Regenerate, Shorten / Expand / Continue (revise this
+   * answer), Discard and Revert. Without an open text file Insert opens the text in a new untitled tab.
    */
   function proposeInsert(s: CodePadChatServices, answer: string, warnings: string[], options: AnswerOptions = {}): void {
     const { ctx, el } = s;
-    const active = activeTextTab(s);
-    const selectionAtStart = active ? selectionOffsets(s, active) : null;
     const body = [
       ...s.warningNodes(warnings),
       el('div', 'cp-chat-answer', answer),
-      el('div', 'cp-chat-note', 'Nothing changes until you choose an action. Insert at cursor puts the text where the cursor is; Append and Replace show the change first.'),
+      el(
+        'div',
+        'cp-chat-note',
+        'Nothing changes until you choose an action. In Edit Mode, Insert after selection and Replace selection change only the selected text; Copy, Shorten, Expand and Continue never touch the file.',
+      ),
     ];
     // Where the text went, so Revert can take it out again; inserting after an undo puts it in afresh.
-    let placed: { tab: CodePadTextTab; start: number; original: string } | null = null;
+    let placed: { tab: CodePadTextTab; start: number; original: string; text: string } | null = null;
     // Positions are model offsets, which count line breaks in the model's own line ending (CRLF is two characters).
-    const placedRange = (model: monaco.editor.ITextModel, start: number): monaco.IRange => {
-      const length = answer.replace(/\r?\n/g, model.getEOL()).length;
+    const placedRange = (model: monaco.editor.ITextModel, start: number, text: string): monaco.IRange => {
+      const length = text.replace(/\r?\n/g, model.getEOL()).length;
       const from = model.getPositionAt(start);
       const to = model.getPositionAt(start + length);
       return { startLineNumber: from.lineNumber, startColumn: from.column, endLineNumber: to.lineNumber, endColumn: to.column };
@@ -454,15 +532,15 @@
         return false;
       }
       const { model } = placed.tab;
-      return model.getValueInRange(placedRange(model, placed.start)).replace(/\r\n/g, '\n') === answer;
+      return model.getValueInRange(placedRange(model, placed.start, placed.text)).replace(/\r\n/g, '\n') === placed.text;
     };
-    const place = (mode: 'cursor' | 'selection'): void => {
+    const place = (mode: 'after' | 'selection'): void => {
       if (stillThere()) {
         return;
       }
       const tab = activeTextTab(s);
       if (!tab) {
-        if (mode === 'cursor') {
+        if (mode === 'after') {
           ctx.tabs.openText({ content: answer });
           s.doneNote('There was no open text file, so the text was opened in a new tab.');
         } else {
@@ -471,73 +549,41 @@
         return;
       }
       if (tab.persist.readOnly) {
-        s.doneNote(`${tab.name} is read-only; nothing was applied.`);
+        s.readModeNotice(tab);
         return;
       }
       const selection = ctx.editor.getModel() === tab.model ? ctx.editor.getSelection() : null;
+      if (!selection || selection.isEmpty()) {
+        s.doneNote(`${NEEDS_SELECTION} Select the text in ${tab.name} first (the answer ${mode === 'after' ? 'goes right after it' : 'replaces it'}), then click again.`);
+        return;
+      }
       let range: monaco.IRange;
+      let text = answer;
       if (mode === 'selection') {
-        if (!selection || selection.isEmpty()) {
-          s.doneNote('Nothing is selected any more; select the text to replace and click again.');
-          return;
-        }
         range = selection;
       } else {
-        const at = selection ? selection.getPosition() : tab.model.getFullModelRange().getEndPosition();
-        range = { startLineNumber: at.lineNumber, startColumn: at.column, endLineNumber: at.lineNumber, endColumn: at.column };
+        const end = selection.getEndPosition();
+        range = { startLineNumber: end.lineNumber, startColumn: end.column, endLineNumber: end.lineNumber, endColumn: end.column };
+        // A selection that ends at the end of a line: the answer starts on a new line instead of joining that line.
+        if (end.column === tab.model.getLineMaxColumn(end.lineNumber)) {
+          text = `\n${answer}`;
+        }
       }
       const start = tab.model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn });
       const original = tab.model.getValueInRange(range);
       CodePadVersions.snapshot(tab, 'Before AI: insert answer');
       ctx.tabs.activate(tab);
-      ctx.text.replaceAll(tab.model, [{ range, text: answer }], 'AI chat insert');
-      placed = { tab, start, original };
+      ctx.text.replaceAll(tab.model, [{ range, text }], 'AI chat insert');
+      placed = { tab, start, original, text };
       card.classList.remove('discarded');
       card.classList.add('applied');
     };
-    /** The active text tab for Append / Replace, or null after saying so. */
-    const editTarget = (): CodePadTextTab | null => {
-      const tab = activeTextTab(s);
-      if (!tab) {
-        s.doneNote('Open the text file to change first, then click again.');
-        return null;
-      }
-      if (tab.persist.readOnly) {
-        s.doneNote(`${tab.name} is read-only; nothing was changed.`);
-        return null;
-      }
-      return tab;
-    };
     const revise = (instruction: string): Promise<void> => revisePending(s, instruction, answer, card);
     const actions: CodePadChatCardAction[] = [
-      { label: 'Insert at cursor', primary: true, run: () => place('cursor') },
-      {
-        label: 'Append to document',
-        run: () => {
-          const tab = editTarget();
-          if (tab) {
-            const before = s.lfText(tab);
-            const text = applyOperation(s, tab, parseDoc(tab, before), { operation_type: 'append', new_content: answer });
-            if (text !== null) {
-              proposeEdit(s, tab, before, text, [], 'The answer is added at the end of the document.', 'Before AI: append answer');
-            }
-          }
-        },
-      },
+      { label: 'Insert after selection', primary: true, run: () => place('after') },
+      { label: 'Replace selection', run: () => place('selection') },
     ];
-    if (selectionAtStart) {
-      actions.push({ label: 'Replace selection', run: () => place('selection') });
-    }
     actions.push(
-      {
-        label: 'Replace entire document',
-        run: () => {
-          const tab = editTarget();
-          if (tab) {
-            proposeEdit(s, tab, s.lfText(tab), answer, [], 'The whole document is replaced by the answer.', 'Before AI: replace document');
-          }
-        },
-      },
       {
         label: 'Copy',
         run: async () => {
@@ -575,7 +621,7 @@
           if (placed && stillThere()) {
             const { model } = placed.tab;
             ctx.tabs.activate(placed.tab);
-            ctx.text.replaceAll(model, [{ range: placedRange(model, placed.start), text: placed.original }], 'AI chat insert');
+            ctx.text.replaceAll(model, [{ range: placedRange(model, placed.start, placed.text), text: placed.original }], 'AI chat insert');
           }
           placed = null;
           card.classList.remove('applied');
@@ -776,38 +822,25 @@
     };
   }
 
-  /** A part of the text named by the request (selection or a block reference), as LF offsets with a card note. */
+  /** A part of the selected text named by a block reference, as LF offsets inside it with a card note. */
   interface Region {
     start: number;
     end: number;
     note: string;
   }
 
-  interface EditOptions {
-    completion: boolean;
-    /** Follow the chat scope (visible part / whole file); false works on the whole text (multi-step). */
-    scoped: boolean;
-    region?: Region;
-  }
-
   /**
-   * Plans and runs an edit: completion reads the end window, a region only that part, 'visible' scope the selection or
-   * the lines on screen, otherwise every part in turn. The rest of the text is kept as it is.
+   * Plans and runs an edit of the working text `before` (the selected text): completion reads the end window of it,
+   * otherwise every part is edited in turn (parts sized for the active model).
    */
-  async function computeEdit(s: CodePadChatServices, tab: CodePadTextTab, before: string, instruction: string, options: EditOptions): Promise<TextResult> {
+  async function computeEdit(s: CodePadChatServices, tab: CodePadTextTab, before: string, instruction: string, completion: boolean): Promise<TextResult> {
     const sizing = await sizingFor(s);
-    const lines = before.split(/(?<=\n)/);
     let head = '';
     let body = before;
-    let tail = '';
     let note: string | undefined;
-    if (options.region) {
-      head = before.slice(0, options.region.start);
-      body = before.slice(options.region.start, options.region.end);
-      tail = before.slice(options.region.end);
-      note = options.region.note;
-    } else if (options.completion) {
+    if (completion) {
       // The end of the text is what is completed (an unfinished last sentence included), so the model reads the end.
+      const lines = before.split(/(?<=\n)/);
       let start = lines.length;
       let size = 0;
       while (start > 0 && size + lines[start - 1].length <= sizing.chunkChars) {
@@ -817,35 +850,19 @@
       const from = Math.min(start, Math.max(0, lines.length - 1));
       head = lines.slice(0, from).join('');
       body = lines.slice(from).join('');
-      note = from > 0 ? 'Only the end of the file was read and completed; the rest is unchanged.' : undefined;
-    } else if (options.scoped && s.scope() === 'visible') {
-      const { from, to } = visibleLines(s, tab, lines.length);
-      if (from > 1 || to < lines.length) {
-        head = lines.slice(0, from - 1).join('');
-        body = lines.slice(from - 1, to).join('');
-        tail = lines.slice(to).join('');
-        note = `Only the visible part (lines ${from} to ${to}) was edited. Choose "Whole file" in the chat header to work on every part.`;
-      }
+      note = from > 0 ? 'Only the end of the selected text was read and completed; the rest is unchanged.' : undefined;
     }
     if (body.trim() === '') {
       s.bot('The part to work on is empty, so there is nothing to change.');
       return null;
     }
     const outline = CodePadDocModel.outline(parseDoc(tab, before)).slice(0, OUTLINE_CONTEXT_CHARS);
-    const edited = await editText(s, tab, body, instruction, sizing, { fileName: CodePadSearchCore.displayName(tab.name), outline, single: options.completion });
-    return edited ? { text: head + edited.text + tail, warnings: edited.warnings, note } : null;
+    const edited = await editText(s, tab, body, instruction, sizing, { fileName: CodePadSearchCore.displayName(tab.name), outline, single: completion });
+    return edited ? { text: head + edited.text, warnings: edited.warnings, note } : null;
   }
 
-  /** The part a request names: the selection, or the blocks of a place ("paragraph 2"); undefined = none named, null = not found. */
-  function regionFor(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent): Region | null | undefined {
-    if (intent.selectionOnly) {
-      const selected = selectionOffsets(s, tab);
-      if (!selected) {
-        s.bot(`Nothing is selected in ${tab.name}. Select the text first, or leave out "selection".`);
-        return null;
-      }
-      return { ...selected, note: 'Only the selection was changed.' };
-    }
+  /** The blocks of the selected text a request names ("paragraph 2"); undefined = none named, null = not found. */
+  function regionFor(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent, cursor: number | undefined): Region | null | undefined {
     if (intent.placeText === null) {
       return undefined;
     }
@@ -853,15 +870,15 @@
     if (!ref || ref.kind === 'start' || ref.kind === 'end') {
       return undefined;
     }
-    const blocks = CodePadDocModel.resolve(parseDoc(tab, text), ref, cursorOffset(s, tab));
+    const blocks = CodePadDocModel.resolve(parseDoc(tab, text), ref, cursor);
     if (blocks.length === 0) {
-      s.bot(`I could not find ${describeRef(ref)} in ${tab.name}.`);
+      s.bot(`I could not find ${describeRef(ref)} in the selected text of ${tab.name}.`);
       return null;
     }
     const first = blocks[0];
     const last = blocks[blocks.length - 1];
     const lines = first.startLine === last.endLine ? `line ${first.startLine}` : `lines ${first.startLine} to ${last.endLine}`;
-    return { start: first.start, end: last.end, note: `Only ${describeRef(ref)} (${lines}) was changed.` };
+    return { start: first.start, end: last.end, note: `Only ${describeRef(ref)} of the selected text (${lines} of it) was changed.` };
   }
 
   /** A place reference in words for messages. */
@@ -905,7 +922,7 @@
     | { kind: 'offset'; offset: number; prefix: string; suffix: string; where: string };
 
   /** Resolves the place of an insert request; null after saying why when it cannot be found. */
-  function locate(s: CodePadChatServices, tab: CodePadTextTab, doc: CodePadDocument, intent: CodePadChatIntent): InsertPlace | null {
+  function locate(s: CodePadChatServices, tab: CodePadTextTab, doc: CodePadDocument, intent: CodePadChatIntent, cursor: number | undefined): InsertPlace | null {
     if (intent.position === 'start' || intent.position === 'end') {
       return { kind: 'doc', position: intent.position };
     }
@@ -915,7 +932,6 @@
         s.bot(`${tab.name} has no list to add to. Say where the new text goes instead, for example "after the second paragraph".`);
         return null;
       }
-      const cursor = cursorOffset(s, tab);
       const atCursor = cursor === undefined ? undefined : lists.find((block) => cursor >= block.start && cursor <= block.end);
       return { kind: 'block', block: atCursor ?? lists[lists.length - 1], position: 'inside_end', list: true };
     }
@@ -944,9 +960,9 @@
       }
       return { kind: 'offset', offset: lineEnd, prefix: '\n', suffix: '', where: `after line ${ref.line}` };
     }
-    const blocks = CodePadDocModel.resolve(doc, ref, cursorOffset(s, tab));
+    const blocks = CodePadDocModel.resolve(doc, ref, cursor);
     if (blocks.length === 0) {
-      s.bot(`I could not find ${describeRef(ref)} in ${tab.name}.`);
+      s.bot(`I could not find ${describeRef(ref)} in the selected text of ${tab.name}.`);
       return null;
     }
     const block = position === 'before' ? blocks[0] : blocks[blocks.length - 1];
@@ -1020,9 +1036,16 @@
    * Builds the text with new content at a place: the quoted literal as is, else the model writes ONLY the new
    * content from the target block and its neighbours. `content` overrides both (a follow-up inserting an answer).
    */
-  async function computeInsert(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent, content?: string): Promise<TextResult> {
+  async function computeInsert(
+    s: CodePadChatServices,
+    tab: CodePadTextTab,
+    text: string,
+    intent: CodePadChatIntent,
+    cursor: number | undefined,
+    content?: string,
+  ): Promise<TextResult> {
     const doc = parseDoc(tab, text);
-    const where = locate(s, tab, doc, intent);
+    const where = locate(s, tab, doc, intent, cursor);
     if (!where) {
       return null;
     }
@@ -1083,8 +1106,8 @@
   const editFile: CodePadChatTool = {
     id: 'edit-file',
     title: 'Edit',
-    description: 'Rewrite or reformat this file (long files are edited part by part)',
-    example: 'Rewrite this file in a more formal tone',
+    description: 'Rewrite or reformat the selected text (Edit Mode; a long selection is edited part by part)',
+    example: 'Rewrite the selected text in a more formal tone',
     needsAi: true,
     async execute({ intent }, s) {
       // "make it shorter" right after an answer (not yet applied) means that answer, not the file.
@@ -1093,18 +1116,17 @@
         await revisePending(s, intent.instruction, source, pending ? pending.card : null);
         return;
       }
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      if (before.trim().length === 0) {
-        s.bot(`${tab.name} is empty, so there is nothing to change.`);
+      if (scope.text.trim().length === 0) {
+        s.bot('The selected text is empty, so there is nothing to change.');
         return;
       }
-      const result = await computeEdit(s, tab, before, intent.instruction, { completion: intent.completion, scoped: true });
+      const result = await computeEdit(s, scope.tab, scope.text, intent.instruction, intent.completion);
       if (result) {
-        proposeEdit(s, tab, before, result.text, result.warnings, result.note, versionLabel(intent.instruction));
+        proposeScoped(s, scope, result.text, result.warnings, result.note, versionLabel(intent.instruction));
       }
     },
   };
@@ -1114,37 +1136,42 @@
     `Translate the text into ${language}. Keep the formatting and the structure exactly (headings, lists, tables, line breaks, Markdown and code), ` +
     'keep code, names, numbers and technical terms as they are, and return only the translation.';
 
-  async function computeTranslate(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent, scoped: boolean): Promise<TextResult> {
+  /** Translates the working text (the selected text), or only the block of it a place names ("paragraph 2"). */
+  async function computeTranslate(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent, cursor: number | undefined): Promise<TextResult> {
     if (!intent.language) {
-      s.bot('Which language should it be translated into? For example: translate this file to French.');
+      s.bot('Which language should it be translated into? For example: translate the selected text to French.');
       return null;
     }
-    const region = regionFor(s, tab, text, intent);
+    const region = regionFor(s, tab, text, intent, cursor);
     if (region === null) {
       return null;
     }
-    return computeEdit(s, tab, text, translateInstruction(intent.language), { completion: false, scoped, ...(region ? { region } : {}) });
+    const part = region ? text.slice(region.start, region.end) : text;
+    const edited = await computeEdit(s, tab, part, translateInstruction(intent.language), false);
+    if (!edited || !region) {
+      return edited;
+    }
+    return { ...edited, text: text.slice(0, region.start) + edited.text + text.slice(region.end), note: region.note };
   }
 
   const translate: CodePadChatTool = {
     id: 'translate',
     title: 'Translate',
-    description: 'Translate the file, the selection or one paragraph (keeps the formatting)',
-    example: 'Translate this file to French',
+    description: 'Translate the selected text, or one paragraph of it (Edit Mode; keeps the formatting)',
+    example: 'Translate the selected text to French',
     needsAi: true,
     async execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      if (before.trim() === '') {
-        s.bot(`${tab.name} is empty, so there is nothing to translate.`);
+      if (scope.text.trim() === '') {
+        s.bot('The selected text is empty, so there is nothing to translate.');
         return;
       }
-      const result = await computeTranslate(s, tab, before, intent, true);
+      const result = await computeTranslate(s, scope.tab, scope.text, intent, scope.cursor);
       if (result) {
-        proposeEdit(s, tab, before, result.text, result.warnings, result.note, `Before AI: translate to ${intent.language ?? ''}`.trim());
+        proposeScoped(s, scope, result.text, result.warnings, result.note, `Before AI: translate to ${intent.language ?? ''}`.trim());
       }
     },
   };
@@ -1152,18 +1179,17 @@
   const insertAt: CodePadChatTool = {
     id: 'insert-at',
     title: 'Insert at a place',
-    description: 'Add text before or after a paragraph, line or section, at the start, or to a list',
+    description: 'Add text before or after a paragraph, line or section of the selected text, at its start, or to a list in it (Edit Mode)',
     example: 'Add an example after the second paragraph',
     needsAi: true,
     async execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const result = await computeInsert(s, tab, before, intent);
+      const result = await computeInsert(s, scope.tab, scope.text, intent, scope.cursor);
       if (result) {
-        proposeEdit(s, tab, before, result.text, result.warnings, result.note, versionLabel(intent.instruction));
+        proposeScoped(s, scope, result.text, result.warnings, result.note, versionLabel(intent.instruction));
       }
     },
   };
@@ -1179,9 +1205,11 @@
       if (aborted) {
         return;
       }
+      const selected = tab ? selectedText(s, tab) : undefined;
       await s.runAi({
         instruction: intent.instruction,
         tab,
+        ...(selected !== undefined ? { text: selected } : {}),
         output: 'file',
         onDone: (raw, warnings) => {
           const content = modelText(s, raw);
@@ -1212,9 +1240,11 @@
         return;
       }
       const stem = stemOf(tab.name);
+      const selected = selectedText(s, tab);
       await s.runAi({
         instruction: intent.instruction,
         tab,
+        ...(selected !== undefined ? { text: selected } : {}),
         output: 'file',
         onDone: (raw, warnings) => {
           const content = modelText(s, raw);
@@ -1239,15 +1269,21 @@
     if (aborted) {
       return;
     }
-    // In 'visible' scope a long file is read from the part the user sees; the whole file only in 'whole file' scope.
-    let seen: string | undefined;
+    // The selection is read when there is one. Otherwise, in 'visible' scope a long file is read from the part the user
+    // sees; the whole file only in 'whole file' scope.
+    let seen = tab ? selectedText(s, tab) : undefined;
     if (tab && s.scope() === 'visible') {
-      const full = s.lfText(tab);
-      const lines = full.split(/(?<=\n)/);
-      const { from, to } = visibleLines(s, tab, lines.length);
-      const visible = lines.slice(from - 1, to).join('');
-      if (visible.length < full.length) {
-        seen = visible.slice(0, (await sizingFor(s)).chunkChars);
+      const cap = (await sizingFor(s)).chunkChars;
+      if (seen !== undefined) {
+        seen = seen.slice(0, cap);
+      } else {
+        const full = s.lfText(tab);
+        const lines = full.split(/(?<=\n)/);
+        const { from, to } = visibleLines(s, tab, lines.length);
+        const visible = lines.slice(from - 1, to).join('');
+        if (visible.length < full.length) {
+          seen = visible.slice(0, cap);
+        }
       }
     }
     await s.runAi({
@@ -1275,7 +1311,7 @@
   const answer: CodePadChatTool = {
     id: 'answer',
     title: 'Ask',
-    description: 'Ask anything; insert, append or copy the answer, or make it shorter / longer',
+    description: 'Ask anything (about the selection or the file); copy the answer, put it after or over the selected text, or make it shorter / longer',
     example: 'What does this file do?',
     needsAi: true,
     execute({ intent, question }, s) {
@@ -1338,15 +1374,10 @@
       .trim();
   }
 
-  /** Writes new content for the active (or named) file; `variant` > 0 asks for another version (Regenerate). */
-  async function runWriteContent(s: CodePadChatServices, intent: CodePadChatIntent, variant: number): Promise<void> {
-    const active = s.ctx.tabs.active();
-    const tab = intent.target ? s.resolveTextTab(intent, true) : active && active.kind === 'text' ? active : null;
-    if (intent.target && !tab) {
-      return;
-    }
+  /** Writes new content for a file in Edit Mode; `variant` > 0 asks for another version (Regenerate). The answer card puts it after or over the selected text. */
+  async function runWriteContent(s: CodePadChatServices, intent: CodePadChatIntent, tab: CodePadTextTab, variant: number): Promise<void> {
     // The file's own text is not sent: the request is to write NEW content, and the model would judge the file instead.
-    const { label, rule, prose } = contentRule(tab ? tab.model.getLanguageId() : 'plaintext');
+    const { label, rule, prose } = contentRule(tab.model.getLanguageId());
     const limit = wordLimit(intent.instruction);
     const topic = contentTopic(intent.instruction);
     const task = contentTask(intent.instruction);
@@ -1361,7 +1392,7 @@
           `Write a short informative text about ${topic}${limit ? ` in at most ${limit} words` : ''}. ${rule}${suffix}`,
           `Explain ${topic} in simple words${limit ? `, using at most ${limit} words` : ''}.${suffix}`,
         ]
-      : [`Write ${task} for the file "${tab ? tab.name : 'new file'}" (${label}). ${rule}${suffix}`];
+      : [`Write ${task} for the file "${tab.name}" (${label}). ${rule}${suffix}`];
     const attempt = async (index: number): Promise<void> => {
       await s.runAi({
         instruction: prompts[index],
@@ -1388,7 +1419,7 @@
               notes.push('The generated text is not valid JSON; check it before you apply it.');
             }
           }
-          proposeInsert(s, limit && prose ? capWords(text, limit) : text.trim(), notes, { regenerate: () => runWriteContent(s, intent, variant + 1) });
+          proposeInsert(s, limit && prose ? capWords(text, limit) : text.trim(), notes, { regenerate: () => runWriteContent(s, intent, tab, variant + 1) });
         },
       });
     };
@@ -1398,8 +1429,8 @@
   const writeContent: CodePadChatTool = {
     id: 'write-content',
     title: 'Write content',
-    description: 'Generate new content (text, JSON, code...) and insert it into the file',
-    example: 'Insert content about the stock market in this file, max 100 words',
+    description: 'Generate new content (text, JSON, code...) to put after or over the selected text (Edit Mode)',
+    example: 'Write a paragraph about the stock market, max 100 words',
     needsAi: true,
     async execute({ intent }, s) {
       // "add an example" right after an answer revises that answer.
@@ -1408,23 +1439,25 @@
         await revisePending(s, intent.instruction, source, pending ? pending.card : null);
         return;
       }
-      await runWriteContent(s, intent, 0);
+      // The new content goes into the file only after or over the selected text, so a selection is needed up front.
+      const scope = editScope(s, intent);
+      if (!scope) {
+        return;
+      }
+      await runWriteContent(s, intent, scope.tab, 0);
     },
   };
 
-  /** Text with new content at its end: the quoted literal, else what the model writes after reading the end of the text. */
+  /** The selected text with new content at its end: the quoted literal, else what the model writes after reading the end of it. */
   async function computeAppend(s: CodePadChatServices, tab: CodePadTextTab, before: string, intent: CodePadChatIntent): Promise<TextResult> {
-    const join = (added: string): string => {
-      const base = before === '' || before.endsWith('\n') ? before : `${before}\n`;
-      return base + added;
-    };
+    const join = (added: string): string => appendTo(before, added);
     if (intent.literal !== null) {
-      return { text: join(intent.literal), warnings: [], note: 'The text is added at the end of the file.' };
+      return { text: join(intent.literal), warnings: [], note: 'The text is added at the end of the selected text.' };
     }
     // The model reads the end of the text (sized for the active model), which is what the new text follows.
     const sizing = await sizingFor(s);
     const result = await s.runPart({
-      instruction: `Write ONLY the new text to add at the end of the file, not the existing text. ${intent.instruction}`,
+      instruction: `Write ONLY the new text to add at the end of the text, not the existing text. ${intent.instruction}`,
       tab,
       text: before.slice(-sizing.chunkChars),
       output: 'file',
@@ -1433,24 +1466,23 @@
     if (!result || text === null) {
       return null;
     }
-    return { text: join(text.replace(/^\n+/, '')), warnings: result.warnings, note: 'The text is added at the end of the file.' };
+    return { text: join(text.replace(/^\n+/, '')), warnings: result.warnings, note: 'The text is added at the end of the selected text.' };
   }
 
   const appendText: CodePadChatTool = {
     id: 'append-content',
     title: 'Append',
-    description: 'Add text at the end of a file',
-    example: 'Add a closing line at the end of this file',
+    description: 'Add text at the end of the selected text (Edit Mode)',
+    example: 'Add a closing line at the end of the selected text',
     needsAi: true,
     async execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const result = await computeAppend(s, tab, before, intent);
+      const result = await computeAppend(s, scope.tab, scope.text, intent);
       if (result) {
-        proposeEdit(s, tab, before, result.text, result.warnings, result.note, versionLabel(intent.instruction));
+        proposeScoped(s, scope, result.text, result.warnings, result.note, versionLabel(intent.instruction));
       }
     },
   };
@@ -1470,19 +1502,18 @@
   const removeTags: CodePadChatTool = {
     id: 'remove-tags',
     title: 'Remove tags',
-    description: 'Remove HTML tags and comments',
-    example: 'Remove the html tags from this file',
+    description: 'Remove HTML tags and comments from the selected text (Edit Mode)',
+    example: 'Remove the html tags from the selected text',
     needsAi: false,
     execute({ intent }, s) {
       // Removing markup is exact work: a rule does it, so a small model cannot misread it.
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const result = computeRemoveTags(s, tab, before);
+      const result = computeRemoveTags(s, scope.tab, scope.text);
       if (result) {
-        proposeEdit(s, tab, before, result.text, [], undefined, 'Before chat: remove tags');
+        proposeScoped(s, scope, result.text, [], result.note, 'Before chat: remove tags');
       }
     },
   };
@@ -1496,7 +1527,7 @@
       label: 'The lines are sorted.',
       apply: (text, descending) => {
         const sorted = text.replace(/\n+$/, '').split('\n').sort((a, b) => a.localeCompare(b));
-        return `${(descending ? sorted.reverse() : sorted).join('\n')}\n`;
+        return `${(descending ? sorted.reverse() : sorted).join('\n')}${text.endsWith('\n') ? '\n' : ''}`;
       },
     },
     'dedupe-lines': {
@@ -1529,18 +1560,17 @@
   const transformText: CodePadChatTool = {
     id: 'transform-content',
     title: 'Change text',
-    description: 'Clear the file, change case, sort lines, remove duplicate or blank lines',
-    example: 'Remove all content of this file',
+    description: 'Clear the selected text, change case, sort lines, remove duplicate or blank lines in it (Edit Mode)',
+    example: 'Remove all content of the selected text',
     needsAi: false,
     execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const result = computeTransform(s, tab, before, intent);
+      const result = computeTransform(s, scope.tab, scope.text, intent);
       if (result) {
-        proposeEdit(s, tab, before, result.text, [], result.note, `Before chat: ${result.note ?? 'change text'}`);
+        proposeScoped(s, scope, result.text, [], result.note, `Before chat: ${result.note ?? 'change text'}`);
       }
     },
   };
@@ -1562,18 +1592,17 @@
   const findReplace: CodePadChatTool = {
     id: 'find-replace',
     title: 'Replace',
-    description: 'Replace text in a file',
-    example: 'Replace "foo" with "bar" in this file',
+    description: 'Replace text inside the selected text (Edit Mode)',
+    example: 'Replace "foo" with "bar" in the selected text',
     needsAi: false,
     execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const result = computeFindReplace(s, tab, before, intent);
+      const result = computeFindReplace(s, scope.tab, scope.text, intent);
       if (result) {
-        proposeEdit(s, tab, before, result.text, [], result.note, 'Before chat: replace');
+        proposeScoped(s, scope, result.text, [], result.note, 'Before chat: replace');
       }
     },
   };
@@ -1694,7 +1723,7 @@
   const analyzeDocument: CodePadChatTool = {
     id: 'analyze-document',
     title: 'Analyze',
-    description: 'Review a document: structure, duplicates, long sentences, empty sections, plus AI suggestions',
+    description: 'Review the selection or the document (both modes): structure, duplicates, long sentences, empty sections, plus AI suggestions',
     example: 'Analyze this document',
     needsAi: true,
     async execute({ intent, question }, s) {
@@ -1702,15 +1731,17 @@
       if (!tab) {
         return;
       }
-      const text = s.lfText(tab);
+      // Reading works in both modes, on the selection when there is one, else on the file.
+      const selected = selectedText(s, tab);
+      const text = selected ?? s.lfText(tab);
       if (text.trim() === '') {
-        s.bot(`${tab.name} is empty, so there is nothing to analyze.`);
+        s.bot(`${selected !== undefined ? 'The selected text' : tab.name} is empty, so there is nothing to analyze.`);
         return;
       }
       const doc = parseDoc(tab, text);
       const outline = CodePadDocModel.outline(doc);
       const issues = definiteIssues(doc);
-      s.bot(`Analyzing ${tab.name}. The definite issues are counted exactly; the suggestions come from the AI.`);
+      s.bot(`Analyzing ${selected !== undefined ? `the selected text of ${tab.name} (line numbers count from its start)` : tab.name}. The definite issues are counted exactly; the suggestions come from the AI.`);
       const ai = await aiAnalysis(s, doc, outline.slice(0, OUTLINE_CONTEXT_CHARS * 2));
       const report = [
         'Structure',
@@ -1753,25 +1784,30 @@
   const outlineTool: CodePadChatTool = {
     id: 'outline',
     title: 'Table of contents',
-    description: 'Make a table of contents from the headings',
+    description: 'Make a table of contents from the headings of the selection or the file (adding it to the text needs Edit Mode)',
     example: 'Generate a table of contents',
     needsAi: false,
     execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, intent.position === 'start');
+      // Showing the table of contents reads the selection (else the file) in both modes; adding it at the start changes the selected text.
+      const scope = intent.position === 'start' ? editScope(s, intent) : null;
+      if (intent.position === 'start' && !scope) {
+        return;
+      }
+      const tab = scope ? scope.tab : s.resolveTextTab(intent, false);
       if (!tab) {
         return;
       }
-      const before = s.lfText(tab);
+      const before = scope ? scope.text : selectedText(s, tab) ?? s.lfText(tab);
       const doc = parseDoc(tab, before);
       const toc = CodePadDocModel.outline(doc);
       if (toc === '') {
-        s.bot(`${tab.name} has no headings, so there is no table of contents to make.${doc.markdown ? '' : ' Headings are found in Markdown files (lines that start with #).'}`);
+        s.bot(`${scope || selectedText(s, tab) !== undefined ? 'The selected text' : tab.name} has no headings, so there is no table of contents to make.${doc.markdown ? '' : ' Headings are found in Markdown files (lines that start with #).'}`);
         return;
       }
-      if (intent.position === 'start') {
+      if (scope) {
         const text = applyOperation(s, tab, doc, { operation_type: 'prepend', new_content: toc });
         if (text !== null) {
-          proposeEdit(s, tab, before, text, [], 'The table of contents is added at the start.', 'Before chat: table of contents');
+          proposeScoped(s, scope, text, [], 'The table of contents is added at the start of it.', 'Before chat: table of contents');
         }
         return;
       }
@@ -1790,12 +1826,14 @@
       if (!tab) {
         return;
       }
-      const groups = duplicateGroups(parseDoc(tab, s.lfText(tab)));
+      const selected = selectedText(s, tab);
+      const groups = duplicateGroups(parseDoc(tab, selected ?? s.lfText(tab)));
+      const what = selected !== undefined ? `The selected text of ${tab.name}` : tab.name;
       if (groups.length === 0) {
-        s.bot(`${tab.name} has no repeated paragraphs (compared without case and punctuation).`);
+        s.bot(`${what} has no repeated paragraphs (compared without case and punctuation).`);
         return;
       }
-      s.bot(`${tab.name}: ${plural(groups.length, 'text')} occur more than once:`);
+      s.bot(`${what}: ${plural(groups.length, 'text')} occur more than once:`);
       const lines = groups.map((group) => `Lines ${group.map((block) => block.startLine).join(', ')} (${group.length}x): "${firstWords(group[0].text, 12)}"`);
       s.showNode(s.el('pre', 'cp-chat-pre cp-chat-read', lines.join('\n')));
       s.bot('Nothing was changed. To remove repeats, ask for example "remove duplicate lines", or delete them by hand.');
@@ -1803,11 +1841,11 @@
   };
 
   /** The blocks a place names, or null (after saying why). */
-  function namedBlocks(s: CodePadChatServices, tab: CodePadTextTab, doc: CodePadDocument, words: string, what: string): CodePadBlock[] | null {
+  function namedBlocks(s: CodePadChatServices, tab: CodePadTextTab, doc: CodePadDocument, words: string, what: string, cursor: number | undefined): CodePadBlock[] | null {
     const ref = CodePadDocModel.parseRef(words);
-    const blocks = ref ? CodePadDocModel.resolve(doc, ref, cursorOffset(s, tab)) : [];
+    const blocks = ref ? CodePadDocModel.resolve(doc, ref, cursor) : [];
     if (blocks.length === 0) {
-      s.bot(`I could not find ${what} ("${words.trim()}") in ${tab.name}.`);
+      s.bot(`I could not find ${what} ("${words.trim()}") in the selected text of ${tab.name}.`);
       return null;
     }
     return blocks;
@@ -1816,17 +1854,17 @@
   const moveBlock: CodePadChatTool = {
     id: 'move-block',
     title: 'Move text',
-    description: 'Move a paragraph or a whole section to another place in the file',
+    description: 'Move a paragraph or a whole section to another place in the selected text (Edit Mode)',
     example: 'Move the second paragraph after the fourth paragraph',
     needsAi: false,
     execute({ intent }, s) {
-      const tab = s.resolveTextTab(intent, true);
-      if (!tab) {
+      const scope = editScope(s, intent);
+      if (!scope) {
         return;
       }
-      const before = s.lfText(tab);
-      const doc = parseDoc(tab, before);
-      const source = namedBlocks(s, tab, doc, intent.placeText ?? '', 'the text to move');
+      const { tab } = scope;
+      const doc = parseDoc(tab, scope.text);
+      const source = namedBlocks(s, tab, doc, intent.placeText ?? '', 'the text to move', scope.cursor);
       if (!source) {
         return;
       }
@@ -1837,7 +1875,7 @@
       } else if (intent.position === 'end') {
         destination = doc.blocks[doc.blocks.length - 1].id;
       } else {
-        const target = namedBlocks(s, tab, doc, intent.newName ?? '', 'the place to move it to');
+        const target = namedBlocks(s, tab, doc, intent.newName ?? '', 'the place to move it to', scope.cursor);
         if (!target) {
           return;
         }
@@ -1863,7 +1901,7 @@
         s.bot(`The move could not be prepared: ${result.error}`);
         return;
       }
-      proposeEdit(s, tab, before, result.text, [], `Moves ${plural(source.length, 'block')}. Nothing changes until you apply.`, 'Before chat: move text');
+      proposeScoped(s, scope, result.text, [], `Moves ${plural(source.length, 'block')}. Nothing changes until you apply.`, 'Before chat: move text');
     },
   };
 
@@ -2096,7 +2134,7 @@
   const summarizeContent: CodePadChatTool = {
     id: 'summarize-content',
     title: 'Summarize',
-    description: 'Summarize a file or the selection into its own Summary tab',
+    description: 'Summarize the selection or the file (both modes) into its own Summary tab',
     example: 'Summarize this file',
     needsAi: true,
     async execute({ intent }, s) {
@@ -2104,9 +2142,11 @@
       if (!tab) {
         return;
       }
+      // The selection is summarized when there is one (read before the tab is activated: it is the editor's selection).
+      const selection = intent.selectionOnly || (tab.kind === 'text' && selectionOffsets(s, tab) !== null);
       s.ctx.tabs.activate(tab);
-      s.bot(`Summarizing ${intent.selectionOnly ? 'the selection of ' : ''}${tab.name}. The summary opens in its own "Summary of ..." tab; ${tab.name} is not changed.`);
-      await s.ctx.commands.execute(intent.selectionOnly ? 'ai.summarizeSelection' : 'ai.summarizeFile');
+      s.bot(`Summarizing ${selection ? 'the selection of ' : ''}${tab.name}. The summary opens in its own "Summary of ..." tab; ${tab.name} is not changed.`);
+      await s.ctx.commands.execute(selection ? 'ai.summarizeSelection' : 'ai.summarizeFile');
     },
   };
 
@@ -2182,7 +2222,7 @@
   const readFile: CodePadChatTool = {
     id: 'read-file',
     title: 'Show',
-    description: 'Show the first lines of a file',
+    description: 'Show the first lines of the selection or the file',
     example: 'Show the first lines of this file',
     needsAi: false,
     execute({ intent }, s) {
@@ -2190,9 +2230,10 @@
       if (!tab) {
         return;
       }
-      const lines = s.lfText(tab).split('\n');
+      const selected = selectedText(s, tab);
+      const lines = (selected ?? s.lfText(tab)).split('\n');
       const shown = lines.slice(0, READ_LINES).join('\n');
-      s.bot(`${tab.name} (${lines.length} line${lines.length === 1 ? '' : 's'}):`);
+      s.bot(`${selected !== undefined ? `Selection of ${tab.name}` : tab.name} (${lines.length} line${lines.length === 1 ? '' : 's'}):`);
       s.showNode(s.el('pre', 'cp-chat-pre cp-chat-read', shown || '(empty)'));
       if (lines.length > READ_LINES) {
         s.bot(`... ${lines.length - READ_LINES} more lines.`);
@@ -2306,13 +2347,13 @@
   const followUp: CodePadChatTool = {
     id: 'follow-up',
     title: 'Use the answer',
-    description: 'Put the last answer into the document: append it, insert it at a place, or replace the selection',
-    example: 'Append it to my document',
+    description: 'Put the last answer into the selected text: after it, at a place in it, or over it (Edit Mode)',
+    example: 'Insert it after the selected text',
     needsAi: false,
     async execute({ intent }, s) {
       const source = followUpText();
       if (source === null) {
-        s.bot('There is no answer to use yet. Ask a question or ask for some text first, then say for example "append it to my document".');
+        s.bot('There is no answer to use yet. Ask a question or ask for some text first, then say for example "insert it after the selected text".');
         return;
       }
       const tab = activeTextTab(s);
@@ -2321,33 +2362,29 @@
         return;
       }
       if (tab.persist.readOnly) {
-        s.bot(`${tab.name} is read-only.`);
+        s.readModeNotice(tab);
         return;
       }
-      const before = s.lfText(tab);
+      const selected = selectionOffsets(s, tab);
+      if (!selected) {
+        s.bot(`${NEEDS_SELECTION} Select the text in ${tab.name} the answer goes after, into or over, then ask again.`);
+        return;
+      }
+      const scope = scopeOf(s, tab, selected);
       if (intent.followUp === 'replace-selection') {
-        const selected = selectionOffsets(s, tab);
-        if (!selected) {
-          s.bot(`Nothing is selected in ${tab.name}. Select the text to replace, then ask again.`);
-          return;
-        }
-        proposeEdit(s, tab, before, before.slice(0, selected.start) + source + before.slice(selected.end), [], 'The selection is replaced by the answer.', 'Before AI: replace selection');
-        return;
-      }
-      if (intent.followUp === 'replace-document') {
-        proposeEdit(s, tab, before, source, [], 'The whole document is replaced by the answer.', 'Before AI: replace document');
+        proposeScoped(s, scope, source, [], 'The selection is replaced by the answer.', 'Before AI: replace selection');
         return;
       }
       if (intent.followUp === 'append') {
-        const text = applyOperation(s, tab, parseDoc(tab, before), { operation_type: 'append', new_content: source });
+        const text = applyOperation(s, tab, parseDoc(tab, scope.text), { operation_type: 'append', new_content: source });
         if (text !== null) {
-          proposeEdit(s, tab, before, text, [], 'The answer is added at the end of the document.', 'Before AI: append answer');
+          proposeScoped(s, scope, text, [], 'The answer is added right after the selected text.', 'Before AI: insert answer after selection');
         }
         return;
       }
-      const result = await computeInsert(s, tab, before, intent, source);
+      const result = await computeInsert(s, tab, scope.text, intent, scope.cursor, source);
       if (result) {
-        proposeEdit(s, tab, before, result.text, [], result.note, 'Before AI: insert answer');
+        proposeScoped(s, scope, result.text, [], result.note, 'Before AI: insert answer');
       }
     },
   };
@@ -2356,12 +2393,12 @@
   const TEXT_STEPS = new Set<CodePadChatAction>(['edit-file', 'translate', 'transform-content', 'find-replace', 'remove-tags', 'insert-at', 'append-content']);
 
   /** Runs one text step on the working text (in memory). */
-  function computeStep(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent): Promise<TextResult> | TextResult {
+  function computeStep(s: CodePadChatServices, tab: CodePadTextTab, text: string, intent: CodePadChatIntent, cursor: number | undefined): Promise<TextResult> | TextResult {
     switch (intent.action) {
       case 'edit-file':
-        return computeEdit(s, tab, text, intent.instruction, { completion: intent.completion, scoped: false });
+        return computeEdit(s, tab, text, intent.instruction, intent.completion);
       case 'translate':
-        return computeTranslate(s, tab, text, intent, false);
+        return computeTranslate(s, tab, text, intent, cursor);
       case 'transform-content':
         return computeTransform(s, tab, text, intent);
       case 'find-replace':
@@ -2369,7 +2406,7 @@
       case 'remove-tags':
         return computeRemoveTags(s, tab, text);
       case 'insert-at':
-        return computeInsert(s, tab, text, intent);
+        return computeInsert(s, tab, text, intent, cursor);
       case 'append-content':
         return computeAppend(s, tab, text, intent);
       default:
@@ -2380,29 +2417,29 @@
   const multiStep: CodePadChatTool = {
     id: 'multi-step',
     title: 'Several steps',
-    description: 'Do several things in a row; all text changes become one proposal',
-    example: 'Make this file more formal and then add a heading "Summary" at the end',
+    description: 'Do several things in a row; all text changes to the selected text become one proposal (Edit Mode)',
+    example: 'Rewrite the selected text formally and then add a heading "Summary" at the end',
     needsAi: true,
     async execute({ intent }, s) {
       const names = s.ctx.tabs.list().map((tab) => tab.name);
-      let working: { tab: CodePadTextTab; before: string; text: string; warnings: string[]; notes: string[] } | null = null;
+      let working: { scope: EditScope; text: string; warnings: string[]; notes: string[] } | null = null;
       for (let index = 0; index < intent.steps.length; index += 1) {
         const step = intent.steps[index];
         const stepIntent = CodePadChatIntent.parseIntent(step, names);
         s.bot(`Step ${index + 1} of ${intent.steps.length}: ${step}`);
-        const sameTab = !working || stepIntent.target === null || stepIntent.target.toLowerCase() === working.tab.name.toLowerCase();
+        const sameTab = !working || stepIntent.target === null || stepIntent.target.toLowerCase() === working.scope.tab.name.toLowerCase();
         if (TEXT_STEPS.has(stepIntent.action) && sameTab) {
           if (!working) {
-            const tab = s.resolveTextTab(stepIntent, true);
-            if (!tab) {
+            const scope = editScope(s, stepIntent);
+            if (!scope) {
               return;
             }
-            const text = s.lfText(tab);
-            working = { tab, before: text, text, warnings: [], notes: [] };
+            working = { scope, text: scope.text, warnings: [], notes: [] };
           }
-          const result = await computeStep(s, working.tab, working.text, stepIntent);
+          // The cursor offset only describes the original selected text.
+          const result = await computeStep(s, working.scope.tab, working.text, stepIntent, working.text === working.scope.text ? working.scope.cursor : undefined);
           if (!result) {
-            if (working.text === working.before) {
+            if (working.text === working.scope.text) {
               s.bot(`Step ${index + 1} did not finish, so nothing is proposed.`);
               return;
             }
@@ -2420,7 +2457,7 @@
         }
       }
       if (working) {
-        proposeEdit(s, working.tab, working.before, working.text, working.warnings, `All text steps in one proposal:\n${working.notes.join('\n')}`, versionLabel(intent.instruction));
+        proposeScoped(s, working.scope, working.text, working.warnings, `All text steps in one proposal:\n${working.notes.join('\n')}`, versionLabel(intent.instruction));
       }
     },
   };

@@ -35,6 +35,8 @@ const commands: CommandEntry[] = [
   { id: 'tabs.restoreClosed', title: 'Reopen Closed Tab', menu: 'File', order: 55, accelerator: 'CmdOrCtrl+Shift+T', when: 'any' },
 
   { id: 'tabs.pin', title: 'Pin / Unpin Tab', menu: 'View/Tab', order: 10, when: 'any' },
+  { id: 'tab.toggleEditMode', title: 'Edit Mode (This Tab)', menu: 'View/Tab', order: 15, accelerator: 'CmdOrCtrl+Alt+E', when: 'any' },
+  { id: 'tab.editModeAll', title: 'Edit Mode (All Tabs)', menu: 'View/Tab', order: 16, when: 'any' },
   { id: 'tabs.colorNone', title: 'Tab Color: None', menu: 'View/Tab/Tab Color', order: 0, when: 'any' },
   ...colorCommands,
   { id: 'tabs.moveLeft', title: 'Move Tab Left', menu: 'View/Tab', order: 30, separatorBefore: true, accelerator: 'CmdOrCtrl+Shift+PageUp', when: 'any' },

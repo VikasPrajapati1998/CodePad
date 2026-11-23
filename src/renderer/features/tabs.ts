@@ -282,13 +282,13 @@
       { label: 'Reveal in File Explorer', disabled: !hasPath, run: run(() => revealTab(tab)) },
       { separator: true },
     );
-    if (tab.kind === 'text') {
+    if (canPersist) {
       items.push({
-        label: 'Read-Only',
-        checked: Boolean(tab.persist && tab.persist.readOnly),
+        label: 'Edit Mode',
+        checked: !tab.persist.readOnly,
         run: () => {
           app().tabs.activate(tab);
-          app().commands.execute('text.toggleReadOnly');
+          app().commands.execute('tab.toggleEditMode');
         },
       });
     }
@@ -422,9 +422,6 @@
         }
         if (tab.dirty) {
           marks.push('●');
-        }
-        if (persistable(tab) && tab.persist.readOnly) {
-          marks.push('R');
         }
         const mark = document.createElement('span');
         mark.className = 'cp-doc-mark';

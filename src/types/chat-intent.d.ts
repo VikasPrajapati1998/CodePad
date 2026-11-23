@@ -38,8 +38,11 @@ type CodePadChatAction =
 /** Where insert-at puts new content: around a block, at the end of its own text, or at the start / end of the document. */
 type CodePadChatPosition = 'before' | 'after' | 'inside_end' | 'start' | 'end';
 
-/** What a follow-up does with the pending answer card. */
-type CodePadChatFollowUp = 'append' | 'insert' | 'replace-selection' | 'replace-document' | 'revise';
+/**
+ * What a follow-up does with the pending answer card: 'append' puts it after the selected text, 'insert' at a place of
+ * the selected text, 'replace-selection' replaces the selection, 'revise' changes the answer itself.
+ */
+type CodePadChatFollowUp = 'append' | 'insert' | 'replace-selection' | 'revise';
 
 /** Whole-text operations done by a rule (the transform-content tool). */
 type CodePadChatTransform = 'clear' | 'uppercase' | 'lowercase' | 'sort-lines' | 'dedupe-lines' | 'remove-blank-lines' | 'trim-spaces';
@@ -63,7 +66,7 @@ interface CodePadChatIntent {
   transform: CodePadChatTransform | null;
   /** Sort order for sort-lines. */
   descending: boolean;
-  /** summarize-content: only the selected text. */
+  /** summarize-content: only the selected text (content changes always work on the selection, whatever the sentence says). */
   selectionOnly: boolean;
   /** edit-file: the request is to complete or continue the text of the file (never a revision of a pending answer). */
   completion: boolean;

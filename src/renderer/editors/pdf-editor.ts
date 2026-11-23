@@ -443,6 +443,8 @@
     }
 
     const readOnly = !hasText;
+    /** Read Mode (view.setReadOnly): the edit tools are hidden and no edit can start, but Save keeps working. */
+    let locked = false;
     const baseName = String(fileName || 'document').replace(/\.pdf$/i, '');
 
     // ---- state ----
@@ -1076,6 +1078,9 @@
     }
 
     function undo(): void {
+      if (locked) {
+        return;
+      }
       commitEdit();
       const previous = hist.undo.pop();
       if (previous === undefined) {
@@ -1087,6 +1092,9 @@
     }
 
     function redo(): void {
+      if (locked) {
+        return;
+      }
       commitEdit();
       const next = hist.redo.pop();
       if (next === undefined) {
@@ -1099,7 +1107,7 @@
 
     function deleteSelected(): void {
       const edit = selectedEdit();
-      if (!edit) {
+      if (!edit || locked) {
         return;
       }
       const before = JSON.stringify(edits);
@@ -1283,7 +1291,7 @@
 
     // ---- text editing ----
     function startReplace(ps: CpPdfPageState, run: CpPdfRun): void {
-      if (run.rot || readOnly) {
+      if (run.rot || readOnly || locked) {
         return;
       }
       const style = runStyle(ps, run);
@@ -1545,7 +1553,7 @@
       const run = runEl ? runOfEl.get(runEl) : null;
       const editId = editEl ? editEl.dataset.edit : null;
       commitEdit();
-      if (readOnly || !pageEl) {
+      if (readOnly || locked || !pageEl) {
         return;
       }
       const ps = pages[Number(pageEl.dataset.index)];
@@ -1952,6 +1960,13 @@
           return null;
         }
         return { edits: JSON.parse(JSON.stringify(edits)) as CpPdfEdit[], page: currentPage, zoom };
+      },
+
+      /** Read Mode: commits a text box being edited, then hides the edit tools and blocks new edits. */
+      setReadOnly(value: boolean): void {
+        commitEdit();
+        locked = value;
+        root.classList.toggle('cp-pdf-readonly', readOnly || locked);
       },
 
       /** @returns Text for the status bar. */

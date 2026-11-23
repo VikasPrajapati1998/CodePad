@@ -22,6 +22,9 @@
 }
 .cp-docx-banner-text { flex: 1; }
 
+/* Read Mode: the formatting bars are hidden; the find bar stays. */
+.cp-docx-readonly .cp-docx-toolbar:not(.cp-docx-findbar) { display: none; }
+
 .cp-docx-toolbar {
   display: flex;
   flex-wrap: wrap;

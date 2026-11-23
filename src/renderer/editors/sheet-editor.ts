@@ -999,6 +999,8 @@
     const redoStack: HistoryEntry[] = [];
     let savedMarker: HistoryEntry | null = null;
     let edit: EditState | null = null;
+    /** Read Mode: cells cannot be edited, pasted, cleared, sorted or restructured (set through view.setReadOnly). */
+    let locked = false;
     let drag: DragState | null = null;
     let rafId = 0;
     let statusDirty = true;
@@ -1092,6 +1094,7 @@
     };
 
     const run = (entry: HistoryEntry): void => {
+      if (locked) return;
       entry.redo();
       record(entry);
     };
@@ -1102,6 +1105,7 @@
     };
 
     const undo = (): void => {
+      if (locked) return;
       commitEdit(0, 0);
       const entry = undoStack.pop();
       if (!entry) return;
@@ -1112,6 +1116,7 @@
     };
 
     const redo = (): void => {
+      if (locked) return;
       commitEdit(0, 0);
       const entry = redoStack.pop();
       if (!entry) return;
@@ -1122,6 +1127,7 @@
     };
 
     const commitCells = (s: Sheet, changes: CellChange[]): boolean => {
+      if (locked) return false;
       const before: CellChange[] = [];
       const after: CellChange[] = [];
       changes.forEach((ch) => {
@@ -1498,7 +1504,7 @@
     };
 
     const startEdit = (mode: 'edit' | 'enter', initial?: string): void => {
-      if (edit) return;
+      if (edit || locked) return;
       const s = sh();
       const a = mergeAt(s, s.sel.ar, s.sel.ac);
       const r = a ? a.s.r : s.sel.ar;
@@ -2406,6 +2412,14 @@
         findInput.focus();
         findInput.select();
         scheduleRender();
+      },
+
+      /** Read Mode: finishes a cell edit in progress, then blocks every change until Edit Mode. */
+      setReadOnly(value: boolean): void {
+        commitEdit(0, 0);
+        commitFormulaBar();
+        locked = value;
+        formulaBox.readOnly = value;
       },
 
       /** Releases listeners and DOM. */

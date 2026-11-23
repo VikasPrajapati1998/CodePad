@@ -1599,6 +1599,11 @@
         findInput.select();
       },
 
+      setReadOnly(value: boolean): void {
+        page.contentEditable = value ? 'false' : 'true';
+        root.classList.toggle('cp-docx-readonly', value);
+      },
+
       dispose(): void {
         disposed = true;
         document.removeEventListener('selectionchange', onSelectionChange);

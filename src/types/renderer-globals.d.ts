@@ -134,6 +134,8 @@ interface CodePadEditorView {
   /** Ctrl+F while this tab is active. */
   find?(): void;
   setTheme?(theme: 'dark' | 'light'): void;
+  /** Read Mode of the tab: true makes the content non-editable (Save and Save As keep working); called after create and on every mode change. */
+  setReadOnly?(value: boolean): void;
 }
 
 /** What an editor module registers with `CodePadEditors.register`. */
@@ -185,6 +187,8 @@ interface CodePadEventMap {
   'tab:closing': [tab: CodePadTab];
   'tab:created': [tab: CodePadTab];
   'tab:dirty': [tab: CodePadTab];
+  /** Read Mode (persist.readOnly) of a tab changed; announced by tabs.changed() whoever wrote the flag. */
+  'tab:modeChanged': [tab: CodePadTab];
   'tab:pathChanged': [tab: CodePadTab, oldPath: string | null];
   'tab:reloaded': [tab: CodePadTab];
   'tab:reordered': [];

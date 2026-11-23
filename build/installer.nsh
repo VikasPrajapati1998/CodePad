@@ -6,6 +6,7 @@
 ; Exit codes of --install-model: 0 ready, 2 cancelled, 3 offline, 4 integrity, 5 disk space, 6 locked, 1 other.
 ; Installer error levels (silent installs): 6 model failed and install aborted, 7 installed but the model is missing.
 ; An offline install finishes normally; CodePad downloads the model on first start.
+; 3. Registers CodePad in the Explorer "Open with" list for all file types (per-user registry keys, removed on uninstall).
 ; The install is per-user only (package.json nsis.perMachine=false, allowElevation=false), see SECURITY.md.
 
 !include LogicLib.nsh
@@ -74,13 +75,22 @@ FunctionEnd
     ${EndIf}
   ${EndIf}
   cp_model_done:
+  ; Windows "Open with": list CodePad for every file type (not as the default handler). SHCTX is HKCU for the per-user install.
+  ; Re-running on an update just rewrites the same values.
+  WriteRegStr SHCTX "Software\Classes\Applications\${PRODUCT_FILENAME}.exe" "FriendlyAppName" "${PRODUCT_NAME}"
+  WriteRegStr SHCTX "Software\Classes\Applications\${PRODUCT_FILENAME}.exe\shell\open\command" "" '"$INSTDIR\${PRODUCT_FILENAME}.exe" "%1"'
+  WriteRegStr SHCTX "Software\Classes\*\OpenWithList\${PRODUCT_FILENAME}.exe" "" ""
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
 !endif ; BUILD_UNINSTALLER
 
-; Settings and sessions are kept on uninstall as before; only the large model file is removed.
+; Settings and sessions are kept on uninstall as before; only the large model file and the "Open with" entries are removed.
 !macro customUnInstall
   ${IfNot} ${isUpdated}
     RMDir /r "$APPDATA\${PRODUCT_NAME}\models"
+    DeleteRegKey SHCTX "Software\Classes\Applications\${PRODUCT_FILENAME}.exe"
+    DeleteRegKey SHCTX "Software\Classes\*\OpenWithList\${PRODUCT_FILENAME}.exe"
+    System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   ${EndIf}
 !macroend

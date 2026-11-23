@@ -53,8 +53,10 @@ interface CodePadChatServices {
   warningNodes(warnings: string[]): HTMLElement[];
   /** The open tab the intent names, else the active one; says why when there is none. */
   resolveTab(intent: CodePadChatIntent): CodePadTab | null;
-  /** Like resolveTab, but only plain text tabs (writable ones when `forEdit`). */
+  /** Like resolveTab, but only plain text tabs (tabs in Edit Mode when `forEdit`; a tab in Read Mode gets the Read Mode notice). */
   resolveTextTab(intent: CodePadChatIntent, forEdit: boolean): CodePadTextTab | null;
+  /** Says a tab is in Read Mode (content is not changed there) and offers a Switch to Edit Mode button; summaries and insights stay possible. */
+  readModeNotice(tab: CodePadTextTab): void;
   /** The text tab an answer / new file may use as context when the intent asks for it; `aborted` when a named file is missing. */
   contextTab(intent: CodePadChatIntent): { aborted: boolean; tab: CodePadTextTab | null };
   /** The text of a tab with LF line breaks. */
@@ -63,7 +65,7 @@ interface CodePadChatServices {
   runAi(options: CodePadChatAiOptions): Promise<void>;
   /** One request in a series: resolves the answer, or null when it failed or was cancelled (a message was already shown). */
   runPart(options: Omit<CodePadChatAiOptions, 'onDone' | 'onFail'>): Promise<{ text: string; warnings: string[] } | null>;
-  /** The chat's scope setting: only the part of a long file the user sees, or all of it. */
+  /** The chat's reading scope setting (answers, analysis): only the part of a long file the user sees, or all of it. Edits never use it: they work on the selection. */
   scope(): 'visible' | 'all';
   /** Adds a one-time Helpful / Not helpful rating row to an answer card while personal learning is on. */
   addRating(card: HTMLElement, answer: string): void;

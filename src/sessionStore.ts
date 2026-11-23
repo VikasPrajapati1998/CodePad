@@ -91,6 +91,7 @@ function normalizeTab(value: unknown): NormalizedTab | null {
     pinned: raw.pinned === true,
     color: normalizeColor(raw.color),
     active: raw.active === true,
+    readOnly: raw.readOnly === true,
   };
   if (isText) {
     Object.assign(tab, {
@@ -101,7 +102,6 @@ function normalizeTab(value: unknown): NormalizedTab | null {
       // null = the tab matches the file on disk; a string = unsaved text to restore.
       content: typeof raw.content === 'string' ? raw.content : null,
       viewState: normalizeViewState(raw.viewState),
-      readOnly: raw.readOnly === true,
       monitor: raw.monitor === true,
       bookmarks: normalizeBookmarks(raw.bookmarks),
     });

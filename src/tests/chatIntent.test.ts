@@ -69,7 +69,8 @@ test('translate names the language and, for a block, the place', () => {
   assert.equal(block.action, 'translate');
   assert.equal(block.language, 'Spanish');
   assert.equal(block.placeText, 'translate the second paragraph into spanish');
-  assert.equal(parse('translate the selection to German').selectionOnly, true);
+  assert.equal(parse('translate the selection to German').action, 'translate');
+  assert.equal(parse('translate the selection to German').language, 'German');
 });
 
 test('analysing a document', () => {
@@ -164,7 +165,14 @@ test('follow-ups on the pending answer', () => {
   assert.equal(insert.placeText, 'the second paragraph');
   assert.equal(parse('put it at the top').position, 'start');
   assert.equal(parse('replace the selection with it').followUp, 'replace-selection');
-  assert.equal(parse('replace this file with the answer').followUp, 'replace-document');
+  // After the selected text: the answer goes behind the selection ('append' on the selected text)
+  const afterSelection = parse('insert it after the selected text');
+  assert.equal(afterSelection.action, 'follow-up');
+  assert.equal(afterSelection.followUp, 'append');
+  assert.equal(parse('put it at the end of the selection').followUp, 'append');
+  // Replacing the whole document is no follow-up any more: content changes work on the selection only.
+  assert.notEqual(parse('replace this file with the answer').action, 'follow-up');
+  assert.equal(parse('replace this file with the answer').followUp, null);
   const revise = parse('add an example');
   assert.equal(revise.action, 'write-content');
   assert.equal(revise.followUp, 'revise');

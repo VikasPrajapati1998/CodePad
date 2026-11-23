@@ -1,7 +1,7 @@
 {
   "name": "codepad",
   "productName": "CodePad",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A fast, lightweight code and text editor for all kinds of files.",
   "author": "CodePad",
   "main": "dist/main.js",
@@ -15,6 +15,9 @@
     "dist:linux": "npm run build && electron-builder --linux -c.directories.output=installers/Linux"
   },
   "license": "MIT",
+  "config": {
+    "nodeLlamaCppPostinstall": "skip"
+  },
   "dependencies": {
     "@cantoo/pdf-lib": "2.11.1",
     "@pdf-lib/fontkit": "1.1.1",
@@ -214,6 +217,128 @@
         "node_modules/@node-llama-cpp/linux-${arch}/**"
       ]
     },
+    "fileAssociations": [
+      {
+        "ext": [
+          "txt",
+          "text",
+          "log",
+          "ini",
+          "cfg",
+          "conf",
+          "env",
+          "toml"
+        ],
+        "name": "Text File",
+        "description": "Text File",
+        "mimeType": "text/plain",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "md",
+          "markdown"
+        ],
+        "name": "Markdown Document",
+        "description": "Markdown Document",
+        "mimeType": "text/markdown",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "json",
+          "jsonc"
+        ],
+        "name": "JSON File",
+        "description": "JSON File",
+        "mimeType": "application/json",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "yml",
+          "yaml"
+        ],
+        "name": "YAML File",
+        "description": "YAML File",
+        "mimeType": "application/x-yaml",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "xml",
+          "html",
+          "htm",
+          "css",
+          "scss",
+          "less"
+        ],
+        "name": "Web or Markup File",
+        "description": "Web or Markup File",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "js",
+          "mjs",
+          "cjs",
+          "jsx",
+          "ts",
+          "tsx",
+          "py",
+          "java",
+          "c",
+          "h",
+          "cpp",
+          "hpp",
+          "cs",
+          "go",
+          "rs",
+          "rb",
+          "php",
+          "sql"
+        ],
+        "name": "Source Code File",
+        "description": "Source Code File",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "sh",
+          "bat",
+          "cmd",
+          "ps1"
+        ],
+        "name": "Script File",
+        "description": "Script File",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "csv",
+          "tsv",
+          "xlsx",
+          "xls",
+          "ods"
+        ],
+        "name": "Spreadsheet or Table",
+        "description": "Spreadsheet or Table",
+        "role": "Editor"
+      },
+      {
+        "ext": "docx",
+        "name": "Word Document",
+        "description": "Word Document",
+        "role": "Editor"
+      },
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "PDF Document",
+        "mimeType": "application/pdf",
+        "role": "Editor"
+      }
+    ],
     "npmRebuild": false,
     "deb": {
       "fpm": [
@@ -237,6 +362,7 @@
     }
   },
   "allowScripts": {
-    "node-llama-cpp@3.22.1": true
+    "node-llama-cpp@3.22.1": true,
+    "electron-winstaller@5.4.0": true
   }
 }

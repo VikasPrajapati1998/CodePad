@@ -89,6 +89,9 @@ let aiDisposed = false;
 let aiDisposing = false;
 /** Paths from the command line or a second instance that arrived before the renderer finished restoring. */
 let pendingOpen: OpenRequest | null = null;
+/** macOS `open-file` paths received while the app was still starting, and whether startup finished. */
+let macLaunchFiles: string[] = [];
+let appStarted = false;
 
 const CLIPBOARD_PERMISSIONS = new Set<string>(['clipboard-read', 'clipboard-sanitized-write']);
 const MAX_ENCODING_CHECK_CHARS = 64 * 1024 * 1024;
@@ -96,16 +99,13 @@ const MAX_ARG_LENGTH = 4096;
 const MAX_EXTERNAL_URL_LENGTH = 2048;
 const EXTERNAL_PROTOCOLS = new Set<string>(['http:', 'https:', 'mailto:']);
 const EXTERNAL_LINK_MIN_INTERVAL_MS = 1000;
-const DROP_INTENT_TTL_MS = 10 * 1000;
 const MAX_CONFIRM_FILES = 5;
-const MAX_DROP_INTENTS = 100;
+const MAX_DROPPED_FILES = 50;
 const MAX_DIALOG_URL = 200;
 /** Same policy as the meta tag in renderer/index.html, enforced again as a response header. */
 const APP_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; img-src 'self' data:; worker-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';";
 
-/** Paths of a genuine user drop, reported by the preload; each can be approved once within a short time. */
-const dropIntents = new Map<string, number>();
 let lastExternalLinkAt = 0;
 let externalLinkPromptOpen = false;
 
@@ -493,14 +493,6 @@ function registerIpc(): void {
     return response;
   });
 
-  handle('fs:approveDropped', async (_event, filePath) => {
-    const expires = dropIntents.get(filePath);
-    dropIntents.delete(filePath);
-    if (expires === undefined || expires < Date.now()) {
-      throw new Error('That file was not dropped on the window.');
-    }
-    await fileAccess.approveFile(filePath);
-  });
   handle('fs:read', (_event, filePath, options) =>
     fileAccess.readTextFile(filePath, {
       encoding: options && typeof options.encoding === 'string' ? options.encoding : null,
@@ -649,14 +641,17 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.on('fs:dropIntent', (event, paths: unknown) => {
+  // The preload reports the real paths of a trusted user drop; the drop itself is the user's consent, so no dialog.
+  ipcMain.on('fs:dropped', (event, paths: unknown) => {
     if (!mainWindow || event.senderFrame !== mainWindow.webContents.mainFrame || !Array.isArray(paths)) {
       return;
     }
-    const expires = Date.now() + DROP_INTENT_TTL_MS;
-    (paths as unknown[])
-      .slice(0, MAX_DROP_INTENTS)
-      .forEach((item) => typeof item === 'string' && item.length <= MAX_ARG_LENGTH && dropIntents.set(item, expires));
+    const candidates = (paths as unknown[])
+      .slice(0, MAX_DROPPED_FILES)
+      .filter((item): item is string => typeof item === 'string' && item.length <= MAX_ARG_LENGTH && path.isAbsolute(item));
+    approveCommandLinePaths(candidates)
+      .then((approved) => openPaths(approved))
+      .catch((error: unknown) => console.error(`Could not open the dropped files: ${errorMessage(error)}`));
   });
 
   ipcMain.on('app:closeApproved', (event) => {
@@ -877,6 +872,43 @@ async function installModel(): Promise<number> {
   }
 }
 
+/**
+ * macOS hands Finder "Open With"/double-click files to the running app (or the one being launched) through `open-file`.
+ * Files that arrive while the app is launching count as command-line files; later ones come from another process
+ * and get the same confirmation as a second instance. Events of one Finder action are batched into one dialog.
+ */
+function registerMacOpenFile(): void {
+  let batch: string[] = [];
+  let timer: NodeJS.Timeout | null = null;
+  const flush = (): void => {
+    const paths = batch;
+    batch = [];
+    timer = null;
+    confirmSecondInstanceOpen(paths)
+      .then((confirmed) => (confirmed ? approveCommandLinePaths(paths) : []))
+      .then((approved) => openPaths(approved))
+      .catch((error: unknown) => console.error(`Could not open the files from Finder: ${errorMessage(error)}`));
+  };
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    if (typeof filePath !== 'string' || filePath.length > MAX_ARG_LENGTH || !path.isAbsolute(filePath)) {
+      return;
+    }
+    if (!appStarted) {
+      if (macLaunchFiles.length < MAX_DROPPED_FILES) {
+        macLaunchFiles.push(filePath);
+      }
+      return;
+    }
+    if (batch.length < MAX_DROPPED_FILES) {
+      batch.push(filePath);
+    }
+    if (!timer) {
+      timer = setTimeout(flush, 150);
+    }
+  });
+}
+
 /** `--install-model`: no single-instance lock, no main window, no other IPC; exits with the code from installModel. */
 function runInstallMode(): void {
   app.on('web-contents-created', (_event, contents) => hardenWebContents(contents));
@@ -910,6 +942,10 @@ if (INSTALL_MODE) {
       .then((approved) => openPaths(approved, line))
       .catch((error: unknown) => console.error(`Could not open the files from the second instance: ${errorMessage(error)}`));
   });
+
+  if (process.platform === 'darwin') {
+    registerMacOpenFile();
+  }
 
   app.on('web-contents-created', (_event, contents) => hardenWebContents(contents));
   app.on('before-quit', (event) => {
@@ -946,7 +982,9 @@ if (INSTALL_MODE) {
     createWindow();
     const { paths, line, noSession } = parseArgs(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd());
     skipSession = noSession;
-    openPaths(await approveCommandLinePaths(paths), line);
+    openPaths(await approveCommandLinePaths([...paths, ...macLaunchFiles]), line);
+    macLaunchFiles = [];
+    appStarted = true;
   });
 
   app.on('window-all-closed', () => app.quit());

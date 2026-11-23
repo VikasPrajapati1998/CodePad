@@ -39,7 +39,7 @@
     /\b(?:content|text|paragraphs?|sentences?|lines?|article|essay|code|function|class|script|snippet|json|data|examples?|section|description|story|email|summary|notes?|list|outline|table|config|configuration|query|html|css|related to|about|regarding|on the topic of)\b/;
   const FILE_WORD = /\b(?:file|tab|document|doc)\b/;
   /** A question rather than a command ("how do you translate hello into French?"). */
-  const QUESTION = /^(?:how|what|why|when|where|which|who|is|are|does|do|can|could|should|would)\b|\?\s*$/;
+  const QUESTION = /^(?:how|what|why|when|where|which|who)\b/;
   /**
    * "move the second paragraph after the third paragraph", "move the section Pricing to the end": groups are the lead,
    * the source place, the relation and the destination place (empty for start/end).
@@ -268,15 +268,19 @@
     return match ? match[2] : null;
   }
 
-  /** A follow-up on the pending answer ("append it to my document", "insert it after the second paragraph"), or null. */
+  /**
+   * A follow-up on the pending answer ("append it to my document", "insert it after the second paragraph"), or null. The
+   * document is only ever changed on the selected text, so "append" puts the answer after the selection and a place
+   * names a block of the selected text.
+   */
   function followUpIntent(text: string, lower: string): CodePadChatIntent | null {
     if (new RegExp(`\\breplace\\s+(?:the\\s+|my\\s+)?(?:current\\s+)?(?:selection|selected text|highlighted text)\\s+(?:with|by)\\s+${PRONOUN}\\s*[.!?]?$`).test(lower)) {
       return result('follow-up', text, null, { followUp: 'replace-selection' });
     }
-    if (new RegExp(`\\breplace\\s+(?:all\\s+of\\s+)?(?:the\\s+(?:whole|entire)\\s+)?(?:${THIS_FILE}|everything)\\s+(?:with|by)\\s+${PRONOUN}\\s*[.!?]?$`).test(lower)) {
-      return result('follow-up', text, null, { followUp: 'replace-document' });
-    }
     const lead = `^${POLITE}(?:append|add|insert|put|paste|place|copy|move)\\s+${PRONOUN}\\s+`;
+    if (new RegExp(`${lead}(?:(?:after|below|following)|(?:at|to)\\s+the\\s+end\\s+of)\\s+(?:the\\s+)?(?:selection|selected text|highlighted text)\\s*[.!?]?$`).test(lower)) {
+      return result('follow-up', text, null, { followUp: 'append' });
+    }
     if (new RegExp(`${lead}(?:(?:to|into|in)\\s+${THIS_FILE}|(?:at|to)\\s+the\\s+(?:end|bottom)(?:\\s+of\\s+${THIS_FILE})?)\\s*[.!?]?$`).test(lower)) {
       return result('follow-up', text, null, { followUp: 'append' });
     }
@@ -372,13 +376,12 @@
       return result('find-duplicates', text, findTarget(text, openNames), { useCurrent: true });
     }
 
-    // translate the file, the selection or one paragraph into a language (an edit with a diff)
+    // translate the selected text, or one paragraph of it, into a language (an edit with a diff)
     if (new RegExp(`^${POLITE}translate\\b`).test(lower) || (/\btranslate\b/.test(lower) && /\b(?:to|into)\s+[a-z]/.test(lower) && !QUESTION.test(lower))) {
       // the place is read from the whole sentence by CodePadDocModel.parseRef ("paragraph 2", "the section Pricing")
       return result('translate', text, findTarget(text, openNames), {
         useCurrent: true,
         language: targetLanguage(text),
-        selectionOnly: /\b(?:selection|selected|highlighted)\b/.test(lower),
         placeText: /\b(?:paragraph|section|heading|line)\b/.test(lower) ? text : null,
       });
     }
@@ -547,7 +550,7 @@
     }
 
     // edit the current file
-    if (EDIT_VERBS.test(lower) || EDIT_PHRASES.test(lower)) {
+    if ((EDIT_VERBS.test(lower) && !QUESTION.test(lower)) || EDIT_PHRASES.test(lower)) {
       return result('edit-file', text, findTarget(text, openNames), { useCurrent: true });
     }
 

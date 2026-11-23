@@ -308,6 +308,8 @@
   /** Re-applies monitoring (read-only + watch) for a tab restored from a session. */
   function resumeMonitor(tab: CodePadTab): void {
     if (tab.persist && tab.persist.monitor) {
+      // The mode before monitoring is not stored in sessions: Read Mode is the default to return to.
+      stateOf(tab).prevReadOnly = true;
       tab.persist.readOnly = true;
       applyReadOnly(tab);
       watchTab(tab);

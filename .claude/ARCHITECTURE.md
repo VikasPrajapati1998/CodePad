@@ -57,6 +57,7 @@ CodePad/
 │   ├── docModel.js         # Pure UMD `CodePadDocModel`: blocks with stable ids, sections, places named in words (parseRef/resolve), outline
 │   ├── docOps.js           # Pure UMD `CodePadDocOps`: structured, version-checked, atomic document operations; line diff and partial apply of accepted hunks
 │   ├── chunker.js          # Pure UMD `CodePadChunker`: token estimate, model budget, heading/paragraph/sentence-aware chunks with overlap, merge
+│   ├── markdown.js         # Pure UMD `CodePadMarkdown`: bounded Markdown parser to a node tree (no HTML), safe link filter; used by the Read Mode preview
 │   ├── searchCore.js       # Pure search/replace engine (extended mode, whole word, regex) shared by Find in Files and tab search
 │   └── commands/           # Static command tables: id, title, menu path, order, accelerator, when. Main builds the menu from them
 │       ├── core.commands.js    # File/Edit/View items of the shell, Window and Help roles
@@ -90,7 +91,7 @@ CodePad/
 │       ├── text-tools.js, column-editor.js, clipboard-history.js, converters.js, hashes.js, text-tools.css   # Text tools, converters, hashes, output panel
 │       ├── view.js, encoding.js, themes.js, outline.js, settings-panel.js, view.css, themes.css   # View toggles, encoding/EOL pickers, extra themes, outline, settings dialog
 │       ├── tabs.js, files.js, sessions.js, compare.js, macros.js, tabs.css, compare.css   # Tab menu/pins/colors, reload/watch/autosave/recent, named sessions, diff view, macros
-│       └── ai-model.js, ai-models.js (Manage Models dialog), ai-rewrite.js (Check Grammar / Rewrite with diff preview and Apply), ai-chat.js + ai-chat.css (floating draggable chat icon and pop-up, AI job plumbing, dispatch), ai-chat-tools.js (the chat tool registry `CodePadChatTools`: edit-file, create-file, extract-to-file, answer, append-content, find-replace, remove-tags, transform-content, write-content, summarize-content, cancel-summary, clear-summary-cache, rename-file, delete-file, save-file, read-file, duplicate-file, list-files, open-file, close-file), spellcheck.js (squiggles and quick fixes), autosuggest.js, ai-suggest.js, ai-summary.js, ai-learning.js (learning on/off, manage, erase commands and dialog), versions.js (File > Save Version / Version History: restore in one undo step, compare in the diff view), grammar-online.js (AI > Check Grammar Online: LanguageTool findings as squiggles and quick fixes), ai.css   # AI status/download/gate, word dropdown, ghost text, summaries (load in this order)
+│       └── ai-model.js, ai-models.js (Manage Models dialog), ai-rewrite.js (Check Grammar / Rewrite with diff preview and Apply), ai-chat.js + ai-chat.css (floating draggable chat icon and pop-up, AI job plumbing, dispatch), ai-chat-tools.js (the chat tool registry `CodePadChatTools`: edit-file, create-file, extract-to-file, answer, append-content, find-replace, remove-tags, transform-content, write-content, summarize-content, cancel-summary, clear-summary-cache, rename-file, delete-file, save-file, read-file, duplicate-file, list-files, open-file, close-file), spellcheck.js (squiggles and quick fixes), autosuggest.js, ai-suggest.js, ai-summary.js, ai-learning.js (learning on/off, manage, erase commands and dialog), markdown-preview.js/.css (rendered Markdown in Read Mode, DOM + textContent only), versions.js (File > Save Version / Version History: restore in one undo step, compare in the diff view), grammar-online.js (AI > Check Grammar Online: LanguageTool findings as squiggles and quick fixes), ai.css   # AI status/download/gate, word dropdown, ghost text, summaries (load in this order)
 ├── vendor/
 │   ├── xlsx-0.20.3.tgz # Official SheetJS CE release, installed as a file: dependency
 │   └── nlc-stub/       # Empty package that npm overrides substitute for unused node-llama-cpp GPU/arch packages
@@ -123,7 +124,7 @@ Command tables in `shared/commands/*.commands.js` -> `menuBuilder.js` (main) bui
 
 ## IPC overview
 
-File access only via `handle()`-guarded IPC in `main.js` (sender check), delegating to `fileAccess.js`: `fs:read/write/readBinary/writeBinary/readDir/stat/isSameFile/hash`, `shell:reveal`, `dialog:*`, `encoding:list/check`, `settings:get/set`, `commands:table`, `recent:*`, `macros:*`, `session:*`, `sessions:*`, `search:start/cancel`, `watch:add/remove`, `window:*`, `app:info`, `ai:*` (registered by aiIpc.js: getStatus, model:download/pause/resume/cancel/delete/checkConnection, suggest, suggest:cancel, summarize, summarize:cancel, summaryCache:clear). Events to the renderer: `command`, `open-paths`, `search:event`, `watch:event`, `ai:event`, `request-close`. The renderer calls `ready()` after session restore so command-line files open last.
+File access only via `handle()`-guarded IPC in `main.js` (sender check), delegating to `fileAccess.js`: `fs:read/write/readBinary/writeBinary/readDir/stat/isSameFile/hash`, `fs:dropped` (one-way, from the preload's trusted drop event; main approves and opens), `shell:reveal`, `dialog:*`, `encoding:list/check`, `settings:get/set`, `commands:table`, `recent:*`, `macros:*`, `session:*`, `sessions:*`, `search:start/cancel`, `watch:add/remove`, `window:*`, `app:info`, `ai:*` (registered by aiIpc.js: getStatus, model:download/pause/resume/cancel/delete/checkConnection, suggest, suggest:cancel, summarize, summarize:cancel, summaryCache:clear). Events to the renderer: `command`, `open-paths`, `search:event`, `watch:event`, `ai:event`, `request-close`. The renderer calls `ready()` after session restore so command-line files open last.
 
 ## Data in userData
 
@@ -132,3 +133,7 @@ File access only via `handle()`-guarded IPC in `main.js` (sender check), delegat
 ## Flow notes
 
 Window close is intercepted: main sends `request-close`, the renderer saves the session snapshot (`session:save`) and calls `approveClose`; it only falls back to per-tab "Save changes?" prompts if the snapshot cannot be written. On startup the renderer loads settings, builds Monaco and ctx, initializes the features, then calls `session:load` and rebuilds the tabs. `renderer/app.js` also holds the content-based language sniffer (`CONTENT_RULES`).
+
+## Modes
+
+Each tab is in Read Mode (`persist.readOnly`, default for disk files) or Edit Mode; commands `tab.toggleEditMode` / `tab.editModeAll`, status item `edit-mode`, event `tab:modeChanged` (emitted by `renderTabs`). Text tabs apply it as Monaco `readOnly`, document views through `setReadOnly?`, Markdown tabs swap Monaco for the preview. The chat services gain `readModeNotice`; edit tools plan on the selection text and apply through `proposeScoped`. Open With: `build.fileAssociations` and `build/installer.nsh` (Windows), `open-file` in `main.js` (macOS), MIME types (Linux).

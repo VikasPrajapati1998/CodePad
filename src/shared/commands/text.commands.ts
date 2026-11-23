@@ -9,7 +9,6 @@
   const CASE = 'Edit/Convert Case';
   const BLANK = 'Edit/Blank Operations';
   const DATE = 'Edit/Insert Date and Time';
-  const READONLY = 'Edit/Read-Only';
   const CONVERT = 'Tools/Convert';
   const HASH = 'Tools/Hash';
 
@@ -70,10 +69,6 @@
     { id: 'text.columnEditor', title: 'Column Editor...', menu: 'Edit', order: 900, separatorBefore: true, accelerator: 'Alt+Shift+C' },
     { id: 'clipboard.history', title: 'Clipboard History', menu: 'Edit', order: 910, accelerator: 'CmdOrCtrl+Shift+H', when: 'any' },
     { id: 'text.redact', title: 'Redact Selection', menu: 'Edit', order: 920 },
-    ...group(READONLY, [
-      ['text.toggleReadOnly', 'Toggle Read-Only (This Tab)'],
-      ['text.readOnlyAll', 'Toggle Read-Only (All Tabs)'],
-    ]),
     ...group(CONVERT, [
       ['conv.base64Encode', 'Base64 Encode'],
       ['conv.base64EncodeUrl', 'Base64 Encode (URL-safe)'],

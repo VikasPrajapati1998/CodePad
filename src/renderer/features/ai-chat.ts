@@ -230,10 +230,40 @@
       return null;
     }
     if (forEdit && tab.persist.readOnly) {
-      bot(`${tab.name} is read-only.`);
+      readModeNotice(tab);
       return null;
     }
     return tab;
+  }
+
+  /** Tells that a tab is in Read Mode and offers one click to switch it to Edit Mode (the tab's own command does the switch). */
+  function readModeNotice(tab: CodePadTextTab): void {
+    const ctx = app();
+    const note = el(
+      'div',
+      'cp-chat-note',
+      `${tab.name} is in Read Mode, so I cannot change its content. Summaries, analysis, answers and file operations (rename, move, save...) still work. ` +
+        'To change text: switch to Edit Mode, select the text and ask again.',
+    );
+    addCard('Read Mode', [note], [
+      {
+        label: 'Switch to Edit Mode',
+        primary: true,
+        run: async () => {
+          if (!ctx.tabs.list().includes(tab)) {
+            bot('The file was closed.');
+            return;
+          }
+          if (!tab.persist.readOnly) {
+            bot(`${tab.name} is already in Edit Mode. Select the text to change and ask again.`);
+            return;
+          }
+          ctx.tabs.activate(tab);
+          await ctx.commands.execute('tab.toggleEditMode');
+          bot(`${tab.name} is in Edit Mode now. Select the text to change and ask again.`);
+        },
+      },
+    ]);
   }
 
   /** The text tab an answer / new file may use as context when the intent asks for it; `aborted` when a named file is not open. */
@@ -547,6 +577,7 @@
     warningNodes,
     resolveTab,
     resolveTextTab,
+    readModeNotice,
     contextTab,
     lfText,
     runAi,
@@ -755,11 +786,11 @@
     return icon;
   }
 
-  /** The "works on" choice of the header: the visible part of a long file or all of it (the `ai.chatScope` setting). */
+  /** The reading scope of the header: the visible part of a long file or all of it (the `ai.chatScope` setting). Edits always work on the selection. */
   function buildScopeSelect(): HTMLElement {
     const select = el('select', 'cp-chat-scope');
-    select.title = 'What the chat reads and edits of a long file';
-    select.setAttribute('aria-label', 'Chat works on');
+    select.title = 'Reading scope: what the chat reads of a long file for answers and analysis when nothing is selected. Edits only ever change the selected text.';
+    select.setAttribute('aria-label', 'Reading scope');
     [['visible', 'Visible part'], ['all', 'Whole file']].forEach(([value, label]) => {
       const option = el('option', undefined, label);
       option.value = value;
@@ -856,24 +887,25 @@
     const row = el('div', 'cp-chat-quick');
     row.setAttribute('role', 'toolbar');
     row.setAttribute('aria-label', 'Quick actions');
-    const actions: Array<[string, string]> = [
-      ['Write', 'Write a paragraph about '],
-      ['Rewrite', 'Rewrite this in a professional tone'],
-      ['Append', 'Append a paragraph about '],
-      ['Insert', 'Insert after the second paragraph: '],
-      ['Summarize', 'Summarize this file'],
-      ['Analyze', 'Analyze this document'],
-      ['Expand', 'Expand the last paragraph with more detail'],
-      ['Proofread', 'Proofread this file'],
-      ['Translate', 'Translate this to Hindi'],
-      ['Find & Replace', 'Replace "old" with "new"'],
-      ['Format', 'Format this as Markdown with headings and lists'],
-      ['Continue Writing', 'Continue writing from where I stopped'],
+    // The third entry marks the actions that change content: they need Edit Mode and a selection.
+    const actions: Array<[string, string, boolean]> = [
+      ['Write', 'Write a paragraph about ', true],
+      ['Rewrite', 'Rewrite the selected text in a professional tone', true],
+      ['Append', 'Append a paragraph about ', true],
+      ['Insert', 'Insert after the second paragraph: ', true],
+      ['Summarize', 'Summarize this file', false],
+      ['Analyze', 'Analyze this document', false],
+      ['Expand', 'Expand the selected text with more detail', true],
+      ['Proofread', 'Proofread the selected text', true],
+      ['Translate', 'Translate the selected text to Hindi', true],
+      ['Find & Replace', 'Replace "old" with "new" in the selected text', true],
+      ['Format', 'Format the selected text as Markdown with headings and lists', true],
+      ['Continue Writing', 'Continue writing the selected text', true],
     ];
-    actions.forEach(([label, template]) => {
+    actions.forEach(([label, template, edits]) => {
       const button = el('button', 'cp-chat-quick-btn', label);
       button.type = 'button';
-      button.title = `${template.trim()} (fills the message box)`;
+      button.title = `${template.trim()} (fills the message box${edits ? '; changes only the selected text, in Edit Mode' : '; uses the selection if there is one'})`;
       button.setAttribute('aria-label', `${label}: fill the message box`);
       button.addEventListener('click', () => fillInput(template));
       row.appendChild(button);
@@ -947,7 +979,7 @@
 
   /** The first message: what the assistant can do, with example prompts that fill the input. */
   function welcome(): void {
-    const node = bot('Hi! Tell me in plain words what to do with your files. I only change something after you press Apply. I can (click one to try it):');
+    const node = bot('Hi! Tell me in plain words what to do with your files. I can read, summarize and analyze in both modes. I change text only in Edit Mode, only the selected text, and only after you press Apply. I can (click one to try it):');
     const list = el('div', 'cp-chat-examples');
     window.CodePadChatTools.list().forEach((tool) => {
       const chip = el('button', 'cp-chat-example', tool.description);

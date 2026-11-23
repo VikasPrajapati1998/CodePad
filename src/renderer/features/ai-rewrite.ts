@@ -1,5 +1,6 @@
-// AI writing tools: "Check Grammar and Spelling" and "Rewrite / Restructure". The selection (or the whole file) of the
-// active text tab goes to main (ctx.ai.rewrite); the result is shown as a diff (original vs proposed) with a docked
+// AI writing tools: "Check Grammar and Spelling" and "Rewrite / Restructure". They change content, so they work only in
+// Edit Mode and only on the selection of the active text tab (a tab in Read Mode is offered a switch). The selection goes
+// to main (ctx.ai.rewrite); the result is shown as a diff (original vs proposed) with a docked
 // Apply / Discard dialog that lists warnings. Nothing changes before Apply, and Apply is one undoable edit.
 // All dynamic text is set with textContent.
 (() => {
@@ -14,7 +15,6 @@
     tab: CodePadTextTab;
     range: monaco.Range;
     text: string;
-    isSelection: boolean;
     /** Whole model text (LF) when the request was made; Apply refuses if it changed. */
     fullBefore: string;
   }
@@ -145,34 +145,62 @@
     return answer === 0;
   }
 
-  /** The text to send: the single selection, or the whole file. Null (with a status message) when impossible. */
-  function readSource(ctx: CodePadCtx, wholeFile: boolean): RewriteSource | null {
+  /**
+   * The text to send: the single selection of the active text tab in Edit Mode. Null (with a status message) when
+   * impossible; a tab in Read Mode is offered a switch to Edit Mode instead (`readModeOffer`).
+   */
+  function readSource(ctx: CodePadCtx): RewriteSource | null {
     const tab = ctx.tabs.active();
     if (!tab || tab.kind !== 'text') {
       ctx.status.set('This works on text tabs only.');
       return null;
     }
     if (tab.persist.readOnly) {
-      ctx.status.set('This file is read-only.');
+      ctx.status.set(`${tab.name} is in Read Mode; switch to Edit Mode to change text.`);
       return null;
     }
     const lf = ctx.monaco.editor.EndOfLinePreference.LF;
     const selected = (ctx.editor.getSelections() || []).filter((range) => !range.isEmpty());
-    if (selected.length > 1 && !wholeFile) {
-      ctx.status.set('Select one block of text (or clear the selection to use the whole file).');
+    if (selected.length === 0) {
+      ctx.status.set('In Edit Mode the AI changes only the selected text. Select the text first.');
       return null;
     }
-    const range = !wholeFile && selected.length === 1 ? selected[0] : tab.model.getFullModelRange();
+    if (selected.length > 1) {
+      ctx.status.set('Select one block of text.');
+      return null;
+    }
+    const [range] = selected;
     const text = tab.model.getValueInRange(range, lf);
     if (text.trim().length === 0) {
       ctx.status.set('There is no text to check.');
       return null;
     }
-    return { tab, range, text, isSelection: !wholeFile && selected.length === 1, fullBefore: tab.model.getValue(lf) };
+    return { tab, range, text, fullBefore: tab.model.getValue(lf) };
   }
 
-  /** Asks for the restructure options. Null when cancelled; `wholeFile` only matters when a selection exists. */
-  function askOptions(ctx: CodePadCtx, hasSelection: boolean): Promise<{ instruction: string; wholeFile: boolean } | null> {
+  /** A tab in Read Mode cannot be rewritten: says so and offers to switch it (the tab's own command does the switch). */
+  async function readModeOffer(ctx: CodePadCtx, title: string): Promise<boolean> {
+    const tab = ctx.tabs.active();
+    if (!tab || tab.kind !== 'text' || !tab.persist.readOnly) {
+      return false;
+    }
+    ctx.status.set(`${tab.name} is in Read Mode.`);
+    const answer = await notice(
+      ctx,
+      title,
+      `${tab.name} is in Read Mode, so its content is not changed. Summaries and analysis still work. To change text, switch to Edit Mode, select the text and run the command again.`,
+      ['Switch to Edit Mode', 'Cancel'],
+    );
+    if (answer === 0 && ctx.tabs.list().includes(tab) && tab.persist.readOnly) {
+      ctx.tabs.activate(tab);
+      await ctx.commands.execute('tab.toggleEditMode');
+      ctx.status.set(`${tab.name} is in Edit Mode now. Select the text and run the command again.`);
+    }
+    return true;
+  }
+
+  /** Asks for the restructure options. Null when cancelled. */
+  function askOptions(ctx: CodePadCtx): Promise<{ instruction: string } | null> {
     return new Promise((resolve) => {
       const body = el('div', 'cp-ai-rewrite-form');
       body.appendChild(
@@ -206,16 +234,8 @@
           });
         }).catch(() => {});
       }
-      let scope: HTMLSelectElement | null = null;
-      if (hasSelection) {
-        scope = el('select', 'cp-input');
-        scope.append(new Option('Selected text only', 'selection'), new Option('Whole file', 'file'));
-        const scopeLabel = el('label', 'cp-prompt-label', 'Scope');
-        scopeLabel.appendChild(scope);
-        body.appendChild(scopeLabel);
-      }
       let done = false;
-      const finish = (value: { instruction: string; wholeFile: boolean } | null): void => {
+      const finish = (value: { instruction: string } | null): void => {
         if (!done) {
           done = true;
           resolve(value);
@@ -229,7 +249,7 @@
           {
             label: 'Start',
             primary: true,
-            onClick: () => finish({ instruction: input.value.trim().slice(0, MAX_INSTRUCTION_CHARS), wholeFile: scope ? scope.value === 'file' : false }),
+            onClick: () => finish({ instruction: input.value.trim().slice(0, MAX_INSTRUCTION_CHARS) }),
           },
         ],
         onClose: () => finish(null),
@@ -335,7 +355,7 @@
     const warnings = ev.warnings ?? [];
     const body = el('div', 'cp-ai-review');
     const changes = typeof ev.changes === 'number' ? `${ev.changes} change${ev.changes === 1 ? '' : 's'} proposed` : 'Changes proposed';
-    body.appendChild(el('div', undefined, `${changes} for ${source.isSelection ? 'the selection' : 'the whole file'}. Nothing is changed until you apply.`));
+    body.appendChild(el('div', undefined, `${changes} for the selection. Nothing is changed until you apply.`));
     if (warnings.length > 0) {
       body.appendChild(el('div', undefined, 'Warnings:'));
       const list = el('ul');
@@ -434,32 +454,34 @@
     }
     starting = { events: [], cancelled: false };
     try {
+      if (await readModeOffer(ctx, title)) {
+        return;
+      }
+      // Fail early (before any dialog) when there is no selection to work on.
+      if (!readSource(ctx)) {
+        return;
+      }
       let instruction = '';
-      let wholeFile = false;
       if (mode === 'restructure') {
-        const probe = readSource(ctx, false);
-        if (!probe) {
-          return;
-        }
-        const options = await askOptions(ctx, probe.isSelection);
+        const options = await askOptions(ctx);
         if (!options) {
           return;
         }
-        ({ instruction, wholeFile } = options);
+        ({ instruction } = options);
       }
       const builtin = await builtinActive(ctx);
       if (builtin && (!(await ensureBuiltinReady(ctx, title)) || !(await qwenNotice(ctx, title)))) {
         return;
       }
       // Read after the dialogs so the text is the latest one.
-      const source = readSource(ctx, wholeFile);
+      const source = readSource(ctx);
       if (!source) {
         return;
       }
-      ctx.status.set(`${verb(mode)}: sending ${source.isSelection ? 'the selection' : source.tab.name}...`);
+      ctx.status.set(`${verb(mode)}: sending the selection...`);
       const reply = await ctx.ai.rewrite({
         text: source.text,
-        name: source.isSelection ? `${source.tab.name} (selection)` : source.tab.name,
+        name: `${source.tab.name} (selection)`,
         mode,
         ...(mode === 'restructure' && instruction ? { instruction } : {}),
         languageId: source.tab.model.getLanguageId(),

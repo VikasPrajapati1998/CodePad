@@ -226,12 +226,40 @@
     }
   }
 
-  // ---- read-only ----------------------------------------------------------
+  // ---- Read Mode / Edit Mode ---------------------------------------------
+  // Read Mode is tab.persist.readOnly. Whoever changes the flag calls ctx.tabs.changed(), which announces
+  // `tab:modeChanged`; the handler in init() then applies the mode to Monaco, to a document view and to the status item.
+
+  /** Tabs that have a mode (everything but the compare view). */
+  type ModeTab = CodePadTextTab | CodePadDocumentTab;
+  const hasMode = (tab: CodePadTab | null | undefined): tab is ModeTab => Boolean(tab && tab.kind !== 'diff');
+
+  let modeItem: CodePadStatusItem | null = null;
 
   function applyReadOnly(ctx: CodePadCtx, tab: CodePadTab | null): void {
     const editor = ctx.editor;
     if (!editor) return;
     editor.updateOptions({ readOnly: Boolean(tab && tab.kind === 'text' && tab.persist && tab.persist.readOnly) });
+  }
+
+  /** Hands the mode to a document view (docx, sheet, pdf) that supports it. */
+  function applyViewMode(tab: CodePadTab): void {
+    if (tab.kind !== 'text' && tab.kind !== 'diff' && tab.view.setReadOnly) {
+      tab.view.setReadOnly(tab.persist.readOnly);
+    }
+  }
+
+  function updateModeItem(tab: CodePadTab | null): void {
+    if (!modeItem) return;
+    if (!hasMode(tab)) {
+      modeItem.set('');
+      return;
+    }
+    const reading = tab.persist.readOnly;
+    modeItem.set(reading ? 'Read Mode' : 'Edit Mode', {
+      title: reading ? 'Read Mode: click to edit this file' : 'Edit Mode: click to switch to Read Mode',
+      state: reading ? 'read' : 'edit',
+    });
   }
 
   // ---- registrations ------------------------------------------------------
@@ -317,25 +345,28 @@
     ctx.text.insertAtCursors(formatDate(new Date(), answer));
   });
 
-  register('text.toggleReadOnly', (ctx) => {
+  register('tab.toggleEditMode', (ctx) => {
     const tab = ctx.tabs.active();
-    if (!tab || !tab.persist) return;
+    if (!hasMode(tab)) return;
+    if (tab.persist.monitor) {
+      ctx.status.set('Stop monitoring this file before switching it to Edit Mode.');
+      return;
+    }
     tab.persist.readOnly = !tab.persist.readOnly;
     ctx.tabs.changed();
-    applyReadOnly(ctx, tab);
-    ctx.status.set(tab.persist.readOnly ? 'Read-only on' : 'Read-only off');
+    ctx.status.set(tab.persist.readOnly ? 'Read Mode' : 'Edit Mode');
   });
 
-  register('text.readOnlyAll', (ctx) => {
-    const tabs = ctx.tabs.list().filter((tab): tab is CodePadTextTab => tab.kind === 'text' && Boolean(tab.persist));
+  register('tab.editModeAll', (ctx) => {
+    // A monitored tab stays in Read Mode while it is monitored.
+    const tabs = ctx.tabs.list().filter((tab): tab is ModeTab => hasMode(tab) && !tab.persist.monitor);
     if (tabs.length === 0) return;
-    const value = !tabs.every((tab) => tab.persist.readOnly);
+    const readOnly = !tabs.some((tab) => tab.persist.readOnly);
     for (const tab of tabs) {
-      tab.persist.readOnly = value;
-      ctx.tabs.changed();
+      tab.persist.readOnly = readOnly;
     }
-    applyReadOnly(ctx, ctx.tabs.active());
-    ctx.status.set(value ? 'All tabs are read-only' : 'Read-only cleared on all tabs');
+    ctx.tabs.changed();
+    ctx.status.set(readOnly ? 'All tabs are in Read Mode' : 'All tabs are in Edit Mode');
   });
 
   register('text.redact', (ctx) => {
@@ -353,9 +384,27 @@
 
   CodePadFeatures.register('text-tools', {
     init(ctx) {
-      ctx.events.on('tab:activated', (tab) => applyReadOnly(ctx, tab));
+      modeItem = ctx.status.addItem({
+        id: 'edit-mode',
+        order: 50,
+        onClick: () => ctx.commands.execute('tab.toggleEditMode'),
+      });
+      ctx.events.on('tab:activated', (tab) => {
+        applyReadOnly(ctx, tab);
+        updateModeItem(tab);
+      });
       ctx.events.on('tab:restored', (tab) => {
-        if (tab === ctx.tabs.active()) applyReadOnly(ctx, tab);
+        if (tab === ctx.tabs.active()) {
+          applyReadOnly(ctx, tab);
+          updateModeItem(tab);
+        }
+      });
+      ctx.events.on('tab:modeChanged', (tab) => {
+        if (tab === ctx.tabs.active()) {
+          applyReadOnly(ctx, tab);
+          updateModeItem(tab);
+        }
+        applyViewMode(tab);
       });
     },
   });

@@ -596,7 +596,6 @@ interface CpIpcChannels {
   'fs:stat': CpChannel<[path: string], CpStatResult>;
   'fs:isSameFile': CpChannel<[approvedPath: string, otherPath: string], boolean>;
   'fs:hash': CpChannel<[path: string, algo: string], CpHashResult>;
-  'fs:approveDropped': CpChannel<[path: string], void>;
   'shell:reveal': CpChannel<[path: string], void>;
   'app:info': CpChannel<[], CpAppInfo>;
   'encoding:list': CpChannel<[], readonly CpEncodingInfo[]>;
@@ -715,8 +714,6 @@ interface CodePadApi {
   reveal: CpInvoke<'shell:reveal'>;
   saveSession: CpInvoke<'session:save'>;
   loadSession: CpInvoke<'session:load'>;
-  /** Grants access to a dropped File object (only real, user-dropped files have a path); resolves with the path. */
-  approveDropped: (file: File) => Promise<string>;
   approveClose: () => void;
   /** Tells main the user cancelled the close, so a later approval is not honored without a new request. */
   cancelClose: () => void;

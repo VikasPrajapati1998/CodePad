@@ -161,6 +161,8 @@
   const menuContributors: Parameters<CodePadTabsApi['contributeMenu']>[0][] = [];
   /** Status bar buttons added by features (ctx.status.addItem), ordered by their `order`. */
   const statusItems: { order: number; button: HTMLButtonElement }[] = [];
+  /** Read Mode (persist.readOnly) of each tab as renderTabs last saw it, to announce changes as `tab:modeChanged`. */
+  const seenReadOnly = new WeakMap<CodePadTab, boolean>();
 
   const baseName = (p: string): string => p.split(/[\\/]/).pop() as string;
 
@@ -561,6 +563,17 @@
     }
     document.title = activeTab ? `${shown(activeTab.name)}${activeTab.dirty ? ' ●' : ''} - CodePad` : 'CodePad';
     scheduleSessionSave();
+    // Whoever changes persist.readOnly (the mode commands, monitoring, summaries) calls tabs.changed(): announce it here.
+    const modeChanged: CodePadTab[] = [];
+    tabs.forEach((tab) => {
+      if (tab.persist) {
+        if (seenReadOnly.get(tab) !== tab.persist.readOnly) {
+          modeChanged.push(tab);
+        }
+        seenReadOnly.set(tab, tab.persist.readOnly);
+      }
+    });
+    modeChanged.forEach((tab) => bus.emit('tab:modeChanged', tab));
   }
 
   /** Smallest N for which no open tab is called Untitled-N. */
@@ -666,7 +679,8 @@
       dirty: false,
       autoDetect: autoDetect ?? !filePath,
       detectTimer: null,
-      persist: newPersist(persist),
+      // Read Mode is the default of a file opened from disk; untitled and empty files start in Edit Mode.
+      persist: newPersist({ readOnly: filePath !== null && content !== '', ...persist }),
       diskStat,
     };
     model.onDidChangeContent((event) => {
@@ -745,7 +759,7 @@
       view: null,
       host,
       stateLost: false,
-      persist: kind === 'diff' ? null : newPersist(),
+      persist: kind === 'diff' ? null : newPersist({ readOnly: filePath !== null }),
       diskStat,
     };
     try {
@@ -771,6 +785,9 @@
       throw error;
     }
     tab.dirty = tab.view.isDirty();
+    if (tab.persist && tab.view.setReadOnly) {
+      tab.view.setReadOnly(tab.persist.readOnly);
+    }
     const created = tab as CodePadViewTab;
     tabs.push(created);
     bus.emit('tab:created', created);
@@ -1308,6 +1325,7 @@
         stateTooLarge,
         pinned: tab.persist.pinned,
         color: tab.persist.color,
+        readOnly: tab.persist.readOnly,
         active: tab === activeTab,
       };
     }
@@ -1483,9 +1501,9 @@
   function applySavedState(tab: SessionTab, saved: CpSessionTab): void {
     tab.persist.pinned = saved.pinned === true;
     tab.persist.color = Number.isInteger(saved.color) ? saved.color : 0;
+    tab.persist.readOnly = saved.readOnly === true;
     if (tab.kind === 'text') {
       tab.viewState = saved.viewState as monaco.editor.ICodeEditorViewState | null;
-      tab.persist.readOnly = saved.readOnly === true;
       tab.persist.monitor = saved.monitor === true;
       tab.persist.bookmarks = Array.isArray(saved.bookmarks) ? [...saved.bookmarks] : [];
     }
@@ -2253,17 +2271,14 @@
     api.onRequestClose(requestClose);
     window.addEventListener('resize', layoutActiveView);
 
-    document.addEventListener('dragover', (event) => event.preventDefault());
-    document.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      for (const file of event.dataTransfer?.files ?? []) {
-        try {
-          await openPath(await api.approveDropped(file));
-        } catch (error) {
-          setStatus(`Could not open ${file.name}: ${errorMessage(error)}`);
-        }
+    // Dropped files are opened by main (the preload reports the real paths); here the browser only must not navigate to them.
+    const preventFileDrop = (event: DragEvent): void => {
+      if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
+        event.preventDefault();
       }
-    });
+    };
+    document.addEventListener('dragover', preventFileDrop, true);
+    document.addEventListener('drop', preventFileDrop, true);
   }
 
   async function init(): Promise<void> {
@@ -2285,6 +2300,7 @@
     editor = monaco.editor.create(els.editor, {
       model: null,
       automaticLayout: true,
+      dropIntoEditor: { enabled: false },
       glyphMargin: true,
       fontLigatures: true,
       cursorSmoothCaretAnimation: 'on',
