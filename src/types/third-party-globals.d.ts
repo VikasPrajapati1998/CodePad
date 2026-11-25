@@ -26,10 +26,16 @@ interface MonacoAmdRequire {
   config(options: { paths: Record<string, string> }): void;
 }
 
+/** The AMD `define` of the Monaco loader; UMD libraries register as AMD modules instead of globals while `amd` is set. */
+interface MonacoAmdDefine {
+  amd?: object | undefined;
+}
+
 interface Window {
   /** Set by the AMD loader once `vs/editor/editor.main` has loaded. */
   monaco: typeof monaco;
   require: MonacoAmdRequire;
+  define?: MonacoAmdDefine;
   /** Lazy libraries: undefined until the editor module that needs them has loaded the script. */
   mammoth?: MammothModule;
   docx?: DocxModule;

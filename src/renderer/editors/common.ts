@@ -100,6 +100,28 @@
     return `${baseUrl}/node_modules/${relPath}`;
   }
 
+  // The Monaco AMD loader sets `define.amd`, and the UMD libraries (mammoth, SheetJS, pdf-lib, fontkit) then register
+  // as AMD modules instead of creating their global. It is hidden while any library script loads (only libraries
+  // look at `define.amd`; Monaco's own modules call `define` directly), and restored when the last one is done.
+  let plainLoads = 0;
+  let hiddenAmd: object | undefined;
+
+  function hideAmd(): void {
+    if (plainLoads === 0 && window.define) {
+      hiddenAmd = window.define.amd;
+      window.define.amd = undefined;
+    }
+    plainLoads += 1;
+  }
+
+  function restoreAmd(): void {
+    plainLoads -= 1;
+    if (plainLoads === 0 && window.define && hiddenAmd !== undefined) {
+      window.define.amd = hiddenAmd;
+      hiddenAmd = undefined;
+    }
+  }
+
   /** Injects a classic script once; resolves when it has run. A failed load can be retried. */
   function loadScript(url: string): Promise<void> {
     let cached = scriptCache.get(url);
@@ -107,11 +129,16 @@
       const promise = new Promise<void>((resolve, reject) => {
         const script = document.createElement('script');
         script.src = url;
-        script.onload = () => resolve();
+        script.onload = () => {
+          restoreAmd();
+          resolve();
+        };
         script.onerror = () => {
+          restoreAmd();
           script.remove();
           reject(new Error(`Could not load ${url}`));
         };
+        hideAmd();
         document.head.appendChild(script);
       });
       promise.catch(() => scriptCache.delete(url));
