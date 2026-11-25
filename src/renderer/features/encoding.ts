@@ -82,12 +82,13 @@
     if (!encoding) {
       return;
     }
-    const probe = await ctx.files.readText(tab.path, { encoding });
-    if (probe.binary || probe.tooLarge) {
+    // A large file is not probed (it would be read whole); main checks each window and marks invalid bytes view-only.
+    const probe = ctx.large.isLarge(tab) ? null : await ctx.files.readText(tab.path, { encoding });
+    if (probe && (probe.binary || probe.tooLarge)) {
       ctx.status.set('This file cannot be reopened as text.');
       return;
     }
-    if (probe.replaced) {
+    if (probe && probe.replaced) {
       const choice = await ctx.ui.confirm({
         title: 'Reopen with Encoding',
         message: `Some bytes are not valid ${encodingLabel(encoding)}; they would be shown as replacement characters (U+FFFD). Reopen anyway?`,
@@ -106,6 +107,10 @@
   async function convertTo(ctx: CodePadCtx): Promise<void> {
     const tab = activeTextTab(ctx);
     if (!tab) {
+      return;
+    }
+    if (ctx.large.isLarge(tab)) {
+      ctx.large.notAvailable(tab, 'Converting the encoding');
       return;
     }
     const encoding = await pickEncoding(ctx, 'Convert to Encoding', tab.encoding);
@@ -145,6 +150,10 @@
   function convertEol(ctx: CodePadCtx, target: CodePadEol): void {
     const tab = activeTextTab(ctx);
     if (!tab) {
+      return;
+    }
+    if (ctx.large.isLarge(tab)) {
+      ctx.large.notAvailable(tab, 'Changing the line endings');
       return;
     }
     if (tab.persist && tab.persist.readOnly) {

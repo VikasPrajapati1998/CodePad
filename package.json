@@ -1,7 +1,7 @@
 {
   "name": "codepad",
   "productName": "CodePad",
-  "version": "1.5.0",
+  "version": "1.5.2",
   "description": "A fast, lightweight code and text editor for all kinds of files.",
   "author": "CodePad",
   "main": "dist/main.js",

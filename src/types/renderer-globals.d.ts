@@ -51,7 +51,58 @@ interface CodePadTextTab extends CodePadTabBase {
   savedVersion: number;
   autoDetect: boolean;
   detectTimer: number | null;
+  /** Large-file mode (the model holds one window of the file); null for every normal text tab. */
+  large: CodePadLargeState | null;
 }
+
+/** The loaded window of a large tab as the renderer tracks it (what main served, minus the text). */
+interface CodePadLargeWindowView {
+  windowId: number;
+  revision: number;
+  byteStart: number;
+  byteEnd: number;
+  firstLine: number;
+  firstLineExact: boolean;
+  /** Model lines (1-based) that continue the previous model line (long-line segments). */
+  continuation: number[];
+  /** Byte offset of each continuation segment start (status "Byte ≈" in long lines). */
+  segmentBytes: number[];
+  atStart: boolean;
+  atEnd: boolean;
+  readOnly: CpLargeReadOnlyReason | null;
+}
+
+interface CodePadLargeIndexStats {
+  bytes: number;
+  lines: number;
+  done: boolean;
+  totalLines: number | null;
+  estimatedLines: number;
+}
+
+/** State of a large tab; the file itself stays in main behind `handle`. */
+interface CodePadLargeState {
+  handle: string;
+  size: number;
+  mtimeMs: number;
+  seek: CpLargeSeek;
+  view: CodePadLargeWindowView;
+  /** A prefetched window (paging) that is not shown yet. */
+  pending: CpLargeWindow | null;
+  /** Alternative version id of the model when its window was loaded or last committed. */
+  baseVersion: number;
+  /** Main has uncommitted-to-disk edits (overlay revision differs from the saved one). */
+  overlayDirty: boolean;
+  /** True while the renderer swaps window text (no dirty marker, no session save). */
+  applying: boolean;
+  busy: null | 'window' | 'commit' | 'save' | 'undo' | 'find';
+  index: CodePadLargeIndexStats;
+  /** The file changed on disk under the edits: they can no longer be saved. */
+  baseLost: boolean;
+  following: boolean;
+}
+
+type CodePadLargeTextTab = CodePadTextTab & { large: CodePadLargeState };
 
 /** A docx / spreadsheet / pdf tab: `view` is created by the editor module and rendered inside `host`. */
 interface CodePadDocumentTab extends CodePadTabBase {
@@ -235,6 +286,8 @@ interface CodePadCommandDefinition {
   title?: string;
   category?: string;
   when?: 'text' | 'any';
+  /** Large-file gate for commands that are not in the static table: 'off' refuses them on a large tab. */
+  large?: 'ok' | 'off';
 }
 
 interface CodePadCommandInfo {
@@ -559,6 +612,95 @@ interface CodePadFilesApi {
   };
 }
 
+type CodePadLargeFindOutcome = { found: true; wrapped: boolean } | { found: false; cancelled: boolean };
+
+/** What a feature may ask of a large tab (ctx.large); `isLarge` is the one guard every whole-document feature uses. */
+interface CodePadLargeApi {
+  isLarge(tab: CodePadTab | null | undefined): tab is CodePadLargeTextTab;
+  /** Status text "<what> is not available for large files (5.2 GB)." */
+  notAvailable(tab: CodePadLargeTextTab, what: string): void;
+  /** The loaded window (what "visible" and "all" reads mean for a large tab). */
+  windowText(tab: CodePadLargeTextTab): { text: string; firstLine: number; exact: boolean; lineCount: number };
+  /** Loads the part of the file around the target and moves the cursor there; false when it failed or was cancelled. */
+  goTo(tab: CodePadLargeTextTab, target: { line: number } | { permille: number } | { byte: number } | 'start' | 'end'): Promise<boolean>;
+  /** Searches the file beyond the loaded window (from its end, or backward from its start) and shows the match. */
+  find(tab: CodePadLargeTextTab, query: CpLargeFindQuery, direction: 'next' | 'prev'): Promise<CodePadLargeFindOutcome>;
+  /** Counts the matches in the whole file; null when cancelled or failed. */
+  count(tab: CodePadLargeTextTab, query: CpLargeFindQuery, onProgress: (permille: number) => void): Promise<number | null>;
+  /** Cancels the running find, count or line lookup. */
+  cancel(tab: CodePadLargeTextTab): void;
+  /** Classifies a change on disk and applies the silent part (appended bytes, reload of a clean tab). */
+  refresh(tab: CodePadLargeTextTab): Promise<CpLargeDiskKind>;
+  /** Copies the loaded window into a new untitled tab. */
+  openWindowAsUntitled(tab: CodePadLargeTextTab): CodePadTextTab;
+}
+
+/** Everything the large-tab controller needs from app.ts. */
+interface CodePadLargeDeps {
+  /** `window.codepad`; the controller uses its `large` part. */
+  api: CodePadApi;
+  monaco: typeof monaco;
+  getEditor(): monaco.editor.IStandaloneCodeEditor;
+  /** The file scrollbar element (#large-scroll) and the editor host it overlays. */
+  scrollHost: HTMLElement;
+  editorHost: HTMLElement;
+  settings: CodePadSettingsApi;
+  ui: CodePadUIApi;
+  bus: CodePadBusApi;
+  getActive(): CodePadTab | null;
+  setStatus(text: string): void;
+  addStatusItem: CodePadStatusApi['addItem'];
+  markDirty(tab: CodePadTab, dirty: boolean): void;
+  /** Re-renders the status bar for the active tab (cursor, encoding, mode...). */
+  refreshStatus(): void;
+  /** Monaco options of every setting that maps to one. */
+  settingsOptions(): Record<string, unknown>;
+  openText(options?: { name?: string; content?: string; language?: string }): CodePadTextTab;
+  baseName(path: string): string;
+  encodingLabel(id: string): string;
+}
+
+/** A large tab's cursor and top line as a session stores them (see CpSessionTab.large). */
+interface CodePadLargePosition {
+  byte: number;
+  sub: number;
+  cursorLine: number;
+  cursorColumn: number;
+}
+
+/** The glue between app.ts and the large-tab machinery (renderer/core/largeTabs.ts). */
+interface CodePadLargeController {
+  readonly api: CodePadLargeApi;
+  open(filePath: string, options?: { encoding?: string | null }): Promise<CpLargeResult<CpLargeOpenOk>>;
+  createState(opened: CpLargeOpenOk): CodePadLargeState;
+  /** Registers a freshly created tab (event routing, model baseline). */
+  initTab(tab: CodePadLargeTextTab): void;
+  /** Model change of a large tab (dirty rule, size limit). */
+  modelChanged(tab: CodePadLargeTextTab, event: monaco.editor.IModelContentChangedEvent): void;
+  /** The tab shown in the editor now, or null for any other tab. */
+  activate(tab: CodePadLargeTextTab | null): void;
+  /** Commits the edits of the loaded window to main (tab deactivation, save, close). */
+  commit(tab: CodePadLargeTextTab): Promise<boolean>;
+  /** Re-applies the large-tab editor options (after a setting or a mode change). */
+  applyOptions(): void;
+  modeChanged(tab: CodePadTab): void;
+  save(tab: CodePadLargeTextTab): Promise<boolean>;
+  saveAs(tab: CodePadLargeTextTab, targetPath: string): Promise<boolean>;
+  reload(tab: CodePadLargeTextTab, options?: { encoding?: string }): Promise<boolean>;
+  /** Releases the main-side session of a tab that is being removed. */
+  close(tab: CodePadLargeTextTab): void;
+  position(tab: CodePadLargeTextTab): Promise<CodePadLargePosition>;
+  restorePosition(tab: CodePadLargeTextTab, saved: CodePadLargePosition): Promise<void>;
+  goToLine(tab: CodePadLargeTextTab, line: number, column?: number, length?: number): Promise<boolean>;
+  promptGoToLine(tab: CodePadLargeTextTab): Promise<void>;
+  promptGoToPercent(tab: CodePadLargeTextTab): Promise<void>;
+  positionLabel(tab: CodePadLargeTextTab, position: { lineNumber: number; column: number }): string;
+}
+
+interface CodePadLargeTabsApi {
+  create(deps: CodePadLargeDeps): CodePadLargeController;
+}
+
 interface CodePadStatusItem {
   /** Empty text hides the button. */
   set(text: string, options?: { title?: string; state?: string }): void;
@@ -627,6 +769,7 @@ interface CodePadCtx {
   readonly events: CodePadBusApi;
   readonly session: CodePadSessionApi;
   readonly app: CodePadAppApi;
+  readonly large: CodePadLargeApi;
 }
 
 // ---------- Globals set by renderer/core/*.ts ----------
@@ -639,6 +782,7 @@ declare var CodePadUI: Readonly<CodePadUIApi>;
 declare var CodePadPanels: Readonly<CodePadPanelsApi>;
 declare var CodePadFeatures: Readonly<CodePadFeaturesApi>;
 declare var CodePadEditors: Readonly<CodePadEditorsApi>;
+declare var CodePadLargeTabs: Readonly<CodePadLargeTabsApi>;
 
 // ---------- Version history (renderer/core/versions.ts) ----------
 

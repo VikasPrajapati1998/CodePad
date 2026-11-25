@@ -221,7 +221,8 @@
 
   function activeModel(ctx: CodePadCtx): monaco.editor.ITextModel | null {
     const tab = ctx.tabs.active();
-    return tab && tab.kind === 'text' ? tab.model : null;
+    // No squiggles for large files: their model is only a loaded window.
+    return tab && tab.kind === 'text' && !ctx.large.isLarge(tab) ? tab.model : null;
   }
 
   function schedule(): void {

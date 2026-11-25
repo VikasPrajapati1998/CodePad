@@ -192,6 +192,11 @@
   });
 
   register('hash.tab', async (ctx) => {
+    const active = ctx.tabs.active();
+    if (ctx.large.isLarge(active)) {
+      ctx.large.notAvailable(active, 'Hashing the tab text');
+      return;
+    }
     const current = ctx.text.selectionOrDocument();
     if (!current) return;
     await hashText(ctx, current.model.getValue(), `Hash of ${current.tab.name}`);
@@ -202,6 +207,9 @@
     if (!tab || !tab.path) {
       ctx.status.set('Save the file first to hash it on disk.');
       return;
+    }
+    if (ctx.large.isLarge(tab) && tab.dirty) {
+      ctx.status.set('Unsaved changes are not included: the hash is of the file on disk.');
     }
     await hashPath(ctx, tab.path, `Hash of ${tab.name} on disk`);
   });

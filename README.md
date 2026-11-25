@@ -80,6 +80,14 @@ Build an installer with `npm run dist:win`, `dist:mac` or `dist:linux`. Results 
 
 `CodePad [files...] [-n<line>] [-nosession]`: open the files (also in a running instance), jump to a line in the first one, or start without restoring the previous session.
 
+## Large files
+
+Files over 20 MB (gigabytes are fine) open instantly in large-file mode, always in Read Mode: CodePad keeps the file in the main process and shows about 2 MB at a time, with a scrollbar that maps to the position in the file. Line numbers show `~` until the background index reaches them, then become exact. Go to line / percent / start / end, a streaming Find (next, previous, count, cancel; one line at a time, no multi-line matches) and Reload work on any size. Edit Mode works too: edits are kept apart from the file, undo works across the file, and Save streams the original plus your edits into a temp file in the same folder and renames it over the original (it needs free space for a full copy and refuses if the file changed on disk meanwhile). A file that grows (a log) can be followed to its end.
+
+- Off for large files: word wrap, minimap, folding, outline, bookmarks, spell check, compare, version history, sorting and other whole-file tools, Replace All, Find All and Replace in Open Tabs. AI features work on the selection or, without one, on the lines from the first visible line (a summary reads about 30,000 characters from there). Select All and copy cover the loaded part only.
+- Unsaved edits of a large file are not kept in the session: closing or quitting asks to save. Redo of edits inside a window is lost once undo jumps to another part of the file.
+- Lines over 10,000 characters are shown in pieces and are view-only; parts with bytes that are invalid in the chosen encoding are view-only. Find in Files still skips files over its size limit.
+
 ## Known limits
 
 - Macros record typing, editing keys and CodePad commands; Find/Replace widget actions and mouse actions are not recorded.

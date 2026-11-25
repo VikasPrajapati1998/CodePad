@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="features/ai.css">
   <link rel="stylesheet" href="features/ai-chat.css">
   <link rel="stylesheet" href="features/markdown-preview.css">
+  <link rel="stylesheet" href="features/large-find.css">
 </head>
 <body>
   <div id="app">
@@ -36,7 +37,7 @@
     <div id="sidebar-resizer"></div>
     <main id="main">
       <div id="tabs"></div>
-      <div id="editor"></div>
+      <div id="editor"><div id="large-scroll" hidden></div></div>
       <div id="views" class="hidden"></div>
       <div id="welcome">
         <h1>CodePad</h1>
@@ -78,6 +79,7 @@
   <script src="../shared/docOps.js"></script>
   <script src="../shared/chunker.js"></script>
   <script src="../shared/markdown.js"></script>
+  <script src="../shared/largeWindow.js"></script>
   <script src="core/bus.js"></script>
   <script src="core/commands.js"></script>
   <script src="core/settings.js"></script>
@@ -86,6 +88,7 @@
   <script src="core/panels.js"></script>
   <script src="core/features.js"></script>
   <script src="core/versions.js"></script>
+  <script src="core/largeTabs.js"></script>
   <script src="editors/common.js"></script>
   <script src="editors/docx-editor.js"></script>
   <script src="editors/sheet-editor.js"></script>
@@ -121,6 +124,7 @@
   <script src="features/grammar-online.js"></script>
   <script src="features/versions.js"></script>
   <script src="features/markdown-preview.js"></script>
+  <script src="features/large-find.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

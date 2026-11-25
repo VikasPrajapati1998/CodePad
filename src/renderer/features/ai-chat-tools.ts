@@ -1272,7 +1272,8 @@
     // The selection is read when there is one. Otherwise, in 'visible' scope a long file is read from the part the user
     // sees; the whole file only in 'whole file' scope.
     let seen = tab ? selectedText(s, tab) : undefined;
-    if (tab && s.scope() === 'visible') {
+    // A large file is only ever read through its loaded window, so its scope is always 'visible'.
+    if (tab && (s.scope() === 'visible' || s.ctx.large.isLarge(tab))) {
       const cap = (await sizingFor(s)).chunkChars;
       if (seen !== undefined) {
         seen = seen.slice(0, cap);
@@ -2201,6 +2202,11 @@
         if (!tab) {
           return;
         }
+        if (s.ctx.large.isLarge(tab)) {
+          s.ctx.large.notAvailable(tab, 'Duplicating the file');
+          s.bot(`Duplicating the file is not available for large files (${tab.name}). Use Save As to make a copy.`);
+          return;
+        }
         source = { name: tab.name, dir: tab.path ? dirOf(tab.path) : s.folder(), content: textWithEol(s, tab) };
       }
       const ext = extensionOf(source.name);
@@ -2231,6 +2237,11 @@
         return;
       }
       const selected = selectedText(s, tab);
+      if (selected === undefined && s.ctx.large.isLarge(tab)) {
+        s.ctx.large.notAvailable(tab, 'Showing the file');
+        s.bot(`Showing the file is not available for large files (${tab.name}). Select text to show it, or scroll the editor.`);
+        return;
+      }
       const lines = (selected ?? s.lfText(tab)).split('\n');
       const shown = lines.slice(0, READ_LINES).join('\n');
       s.bot(`${selected !== undefined ? `Selection of ${tab.name}` : tab.name} (${lines.length} line${lines.length === 1 ? '' : 's'}):`);

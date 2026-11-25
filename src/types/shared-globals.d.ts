@@ -225,6 +225,11 @@ interface CommandEntry {
   palette?: boolean;
   /** 'recent': the item is the Open Recent submenu built by main. */
   dynamic?: 'recent';
+  /**
+   * Large-file gate: 'ok' lets the command run on a large tab (it works on the selection or the loaded part), 'off'
+   * refuses it with a status message. Default: 'off' for `when: 'text'`, 'ok' for `when: 'any'`.
+   */
+  large?: 'ok' | 'off';
 }
 
 // ---------- AI suggestion text logic (shared/suggestText) ----------

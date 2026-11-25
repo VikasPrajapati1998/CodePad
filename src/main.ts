@@ -7,6 +7,7 @@ import { createGrammarService } from './grammarOnline';
 import { errorCode, errorMessage } from './errorUtils';
 import * as fileAccess from './fileAccess';
 import type { FileWatcher } from './fileWatcher';
+import { createLargeFiles } from './largeFile';
 import * as menuBuilder from './menuBuilder';
 import * as sessionStore from './sessionStore';
 import * as settingsStore from './settingsStore';
@@ -37,6 +38,14 @@ const grammarService = createGrammarService(async (host, characters) => {
     detail: 'This is a free public service. The text leaves this computer and is sent over HTTPS. Nothing is stored by CodePad. You are asked once per session.',
   });
   return response === 1;
+});
+
+/** Sessions of the large-file reader (opaque handles bound to the window that opened them). */
+const largeFiles = createLargeFiles({
+  resolveAllowed: fileAccess.resolveAllowed,
+  isSameFile: fileAccess.isSameFile,
+  send: (event) => send('large:event', event),
+  fallbackEncoding: () => settingsStore.get()['files.fallbackEncoding'],
 });
 
 /** The object `registerAiIpc` returns: settings/window hooks and `dispose`. */
@@ -342,6 +351,19 @@ function createWindow(): void {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  // A reload, crash or destruction of the renderer drops every large file it had open.
+  const contents = mainWindow.webContents;
+  const closeLarge = (): void => {
+    largeFiles.closeOwner(contents.id).catch((error: unknown) => console.error(`Could not close large files: ${errorMessage(error)}`));
+  };
+  contents.on('render-process-gone', closeLarge);
+  contents.on('destroyed', closeLarge);
+  contents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+    if (isMainFrame) {
+      closeLarge();
+    }
+  });
+
   mainWindow.on('close', (event) => {
     if (closeApproved) {
       closeApproved = false;
@@ -521,6 +543,24 @@ function registerIpc(): void {
   handle('shell:reveal', async (_event, filePath) => {
     shell.showItemInFolder(await fileAccess.resolveAllowed(filePath));
   });
+
+  handle('large:open', (event, filePath, options) => largeFiles.open(event.sender.id, filePath, options));
+  handle('large:window', (event, handleId, request) => largeFiles.window(event.sender.id, handleId, request));
+  handle('large:locate', (event, handleId, windowId, modelLine) => largeFiles.locate(event.sender.id, handleId, windowId, modelLine));
+  handle('large:commit', (event, handleId, commit) => largeFiles.commit(event.sender.id, handleId, commit));
+  handle('large:undo', (event, handleId) => largeFiles.undo(event.sender.id, handleId));
+  handle('large:redo', (event, handleId) => largeFiles.redo(event.sender.id, handleId));
+  handle('large:find', (event, handleId, reqId, query, from, direction, wrap) =>
+    largeFiles.find(event.sender.id, handleId, reqId, query, from, direction, wrap),
+  );
+  handle('large:count', (event, handleId, reqId, query) => largeFiles.count(event.sender.id, handleId, reqId, query));
+  handle('large:cancel', (event, handleId, reqId) => largeFiles.cancel(event.sender.id, handleId, reqId));
+  handle('large:save', (event, handleId, reqId, options) => largeFiles.save(event.sender.id, handleId, reqId, options));
+  handle('large:saveAs', (event, handleId, reqId, targetPath, options) =>
+    largeFiles.saveAs(event.sender.id, handleId, reqId, targetPath, options),
+  );
+  handle('large:refresh', (event, handleId) => largeFiles.refresh(event.sender.id, handleId));
+  handle('large:close', (event, handleId) => largeFiles.close(event.sender.id, handleId));
 
   handle('files:create', (_event, filePath, content) => chatFiles.createFile(filePath, content));
   handle('files:rename', (_event, filePath, newName) => chatFiles.renameFile(filePath, newName));
@@ -952,6 +992,7 @@ if (INSTALL_MODE) {
     if (findInFiles) {
       findInFiles.cancelAll();
     }
+    largeFiles.dispose().catch((error: unknown) => console.error(`Could not close large files: ${errorMessage(error)}`));
     if (watcher) {
       watcher.dispose();
     }

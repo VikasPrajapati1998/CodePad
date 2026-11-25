@@ -81,6 +81,10 @@
       const { model } = tab;
       const selection = ctx.editor.getSelection();
       const range = selection && !selection.isEmpty() ? selection : null;
+      if (!range && ctx.large.isLarge(tab)) {
+        ctx.status.set('Select the text first (large files work on the selection).');
+        return;
+      }
       const text = range ? model.getValueInRange(range) : model.getValue();
       if (text.length > MAX_CHARS) {
         ctx.status.set(`The free grammar service accepts at most ${MAX_CHARS} characters at a time. Select a smaller part.`);

@@ -6,6 +6,8 @@
   const STREAM_INTERVAL_MS = 250;
   const RATING_THANKS_MS = 1500;
   const MAX_PDF_PAGES = 3000;
+  /** A large file is summarized from the first visible line on, up to about this many characters (select text for more control). */
+  const LARGE_SUMMARY_CHARS = 30000;
   const MAX_SHEET_ROWS = 20000;
   const MAX_SHEET_COLUMNS = 50;
   const SLOW_CHUNK_COUNT = 40;
@@ -152,6 +154,22 @@
         }
         const lf = ctx.monaco.editor.EndOfLinePreference.LF;
         return { text: ranges.map((range) => tab.model.getValueInRange(range, lf)).join('\n\n'), name: `${tab.name} (selection)` };
+      }
+      if (ctx.large.isLarge(tab)) {
+        // The loaded part is about 2 MB: far more than a summary can take, so start at the first visible line.
+        const part = ctx.large.windowText(tab);
+        const visible = ctx.editor.getVisibleRanges();
+        const startLine = visible.length > 0 ? visible[0].startLineNumber : 1;
+        const lines: string[] = [];
+        let size = 0;
+        for (let number = startLine; number <= tab.model.getLineCount() && size < LARGE_SUMMARY_CHARS; number += 1) {
+          const content = tab.model.getLineContent(number);
+          lines.push(content);
+          size += content.length + 1;
+        }
+        const prefix = part.exact && tab.large.view.continuation.length === 0 ? '' : '~';
+        const first = part.firstLine + startLine - 1;
+        return { text: lines.join('\n'), name: `${tab.name} (lines ${prefix}${first}-${prefix}${first + lines.length - 1}, from the visible part)` };
       }
       return { text: tab.model.getValue(), name: tab.name };
     }

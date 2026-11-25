@@ -228,3 +228,7 @@ Still to verify by running: native accelerator precedence over Monaco on Windows
 - Third-party code inside `node_modules` (Monaco internals, Electron).
 - A dynamic test. No code was executed and no network capture was made.
 - `styles.css` was not reviewed (no security impact expected).
+
+## Large-file channels (`large:*`)
+
+`large:open` takes a path once and checks it with `fileAccess.resolveAllowed`; main answers with a 32-hex opaque handle bound to the opening window (`event.sender.id`). Every other channel takes only the handle and bounded numbers or a bounded query (1000 characters). Handles are closed when the window is destroyed, crashes or navigates. Limits: 8 open large files, 2 concurrent scans, 4 MiB / 100k-line windows, bounded commit, overlay and undo sizes, scan/search watchdog and cancellation. Errors cross IPC only as fixed codes. Save writes a temp file in the same directory, checks free space and that the file is unchanged, then renames; the file text never enters logs.

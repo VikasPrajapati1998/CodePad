@@ -43,6 +43,10 @@
     if (tab && tab.eol === 'cr') {
       return 'CR';
     }
+    // The model of a large tab always uses LF; the file's own line ending is the tab's.
+    if (tab && tab.large && tab.eol === 'crlf') {
+      return 'CRLF';
+    }
     return model.getEOL() === '\r\n' ? 'CRLF' : 'LF';
   }
 
@@ -155,15 +159,17 @@
     const lines = model.getLineCount();
     const noEol = text.length - (lines - 1) * eolLength;
     const size = estimateBytes(text, tab.encoding || 'utf8');
+    // A large tab's model is only the loaded window, so the counts are labelled as such.
+    const part = ctx.large.isLarge(tab) ? ' (loaded part)' : '';
     const rows: [string, string][] = [
       ['File', tab.path || tab.name],
       ['Encoding', tab.encoding || 'utf8'],
       ['Line ending', eolLabel(tab, model)],
-      ['Characters', String(text.length)],
-      ['Characters (no line endings)', String(noEol)],
-      ['Words', String(countWords(text))],
-      ['Lines', String(lines)],
-      ['Bytes', `${size.bytes}${size.exact ? '' : ' (estimated)'}`]
+      [`Characters${part}`, String(text.length)],
+      [`Characters (no line endings)${part}`, String(noEol)],
+      [`Words${part}`, String(countWords(text))],
+      [`Lines${part}`, String(lines)],
+      [`Bytes${part}`, `${size.bytes}${size.exact ? '' : ' (estimated)'}`]
     ];
     const selected = (ctx.editor.getSelections() || [])
       .map((selection) => model.getValueInRange(selection))
@@ -316,6 +322,8 @@
       ctx.settings.onChange(({ key }) => {
         if (key === 'editor.showEol') {
           scheduleEolRefresh();
+        } else if (key === 'editor.wordWrap' && ctx.large.isLarge(ctx.tabs.active())) {
+          ctx.status.set('Word wrap is off for large files.');
         } else if (key === 'editor.tabSizeByLanguage' || key === 'editor.tabSize') {
           ctx.tabs.list().forEach((tab) => applyTabSizeToTab(ctx, tab));
         }

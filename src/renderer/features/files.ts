@@ -10,7 +10,7 @@
   type FileTab = (CodePadTextTab | CodePadDocumentTab) & { path: string };
 
   /** A pending disk-change notice for a tab. */
-  type Banner = { kind: 'deleted' } | { kind: 'changed'; mtimeMs: number };
+  type Banner = { kind: 'deleted' } | { kind: 'changed'; mtimeMs: number } | { kind: 'largeModified' };
 
   interface TabState {
     banner: Banner | null;
@@ -41,6 +41,8 @@
   const watched = new Set<string>();
   /** Per-tab private state: banner, dismissed mtime, reload guard, read-only before monitoring. */
   const states = new WeakMap<CodePadTab, TabState>();
+  /** Large tabs for which the "auto-save is off" note was shown. */
+  const autoSaveNoted = new WeakSet<CodePadTab>();
   /** Pending auto-save timers. */
   const saveTimers = new Map<CodePadTab, number>();
   /** Tab that was active before the latest activation (for focus-loss auto-save). */
@@ -100,6 +102,18 @@
           app().tabs.close(tab, { force: false }).then(renderBanner);
         }),
       );
+    } else if (banner.kind === 'largeModified') {
+      message.textContent = `${tab.name} changed on disk while you were editing; your changes cannot be saved.`;
+      buttons.push(
+        makeButton('Reload (discard)', () => {
+          reloadTab(tab);
+        }),
+      );
+      if (app().large.isLarge(tab)) {
+        buttons.push(makeButton('Open visible part as new tab', () => {
+          app().large.openWindowAsUntitled(tab);
+        }));
+      }
     } else {
       message.textContent = `${tab.name} changed on disk.`;
       buttons.push(
@@ -111,7 +125,7 @@
           clearBanner(tab);
         }),
       );
-      if (tab.kind === 'text') {
+      if (tab.kind === 'text' && !app().large.isLarge(tab)) {
         buttons.push(makeButton('Compare', () => {
           app().commands.execute('compare.withDisk');
         }));
@@ -163,6 +177,55 @@
   }
 
   /**
+   * Large tabs: main classifies the change (same, appended, replaced, modified, deleted) and this applies the
+   * table of the design: appended grows the index (and follows the end), clean tabs reload silently, dirty
+   * tabs get a banner.
+   */
+  async function handleLargeChange(tab: CodePadLargeTextTab): Promise<void> {
+    const state = stateOf(tab);
+    let kind: CpLargeDiskKind;
+    try {
+      kind = await app().large.refresh(tab);
+    } catch (error) {
+      app().status.set(`Could not check ${tab.name}: ${messageOf(error)}`);
+      return;
+    }
+    if (!app().tabs.list().includes(tab)) {
+      return;
+    }
+    if (kind === 'same') {
+      if (state.banner && state.banner.kind === 'changed') {
+        clearBanner(tab);
+      }
+      return;
+    }
+    if (kind === 'deleted') {
+      state.banner = { kind: 'deleted' };
+      renderBanner();
+      return;
+    }
+    if (kind === 'appended') {
+      app().status.set(`${tab.name} grew on disk.`);
+      if (isMonitoring(tab) || tab.large.following) {
+        await app().large.goTo(tab, 'end');
+      }
+      return;
+    }
+    if (!tab.dirty) {
+      if (await reloadTab(tab) && !isMonitoring(tab)) {
+        app().status.set(`Reloaded ${tab.name} (changed on disk).`);
+      }
+      return;
+    }
+    if (kind === 'modified' || tab.large.baseLost) {
+      state.banner = { kind: 'largeModified' };
+    } else if (state.dismissedMtime !== tab.large.mtimeMs) {
+      state.banner = { kind: 'changed', mtimeMs: tab.large.mtimeMs };
+    }
+    renderBanner();
+  }
+
+  /**
    * Applies one disk event to the tab that owns the path.
    * @param tab Open tab.
    * @param kind Event kind.
@@ -179,6 +242,10 @@
         }
       }
       renderBanner();
+      return;
+    }
+    if (app().large.isLarge(tab)) {
+      void handleLargeChange(tab);
       return;
     }
     const known = tab.diskStat;
@@ -323,6 +390,14 @@
       return false;
     }
     if (stateOf(tab).banner) {
+      return false;
+    }
+    if (app().large.isLarge(tab)) {
+      // Saving a large file rewrites all of it, so it is never automatic.
+      if (!autoSaveNoted.has(tab)) {
+        autoSaveNoted.add(tab);
+        app().status.set('Auto-save is off for large files; save with Ctrl+S.');
+      }
       return false;
     }
     if (tab.encoding && !UNICODE_ENCODINGS.has(tab.encoding)) {

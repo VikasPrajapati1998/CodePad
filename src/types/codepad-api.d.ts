@@ -137,6 +137,8 @@ interface CpCommandInfo {
   defaultAccelerator: string;
   when: 'any' | 'text';
   palette: boolean;
+  /** Whether the command works on a large-file tab; omitted: 'ok' for `when: 'any'`, 'off' for `when: 'text'`. */
+  large?: 'ok' | 'off';
 }
 
 // ---------- Recent files, macros ----------
@@ -182,6 +184,16 @@ interface CpSessionTab {
   readOnly?: boolean;
   monitor?: boolean;
   bookmarks?: number[];
+  /** Large-file tabs only: the top visible line (anchor) and the cursor relative to it. `content` is always null for them. */
+  large?: CpSessionLarge;
+}
+
+/** Where a large-file tab was scrolled to; every number is a non-negative safe integer. */
+interface CpSessionLarge {
+  byte: number;
+  sub: number;
+  cursorLine: number;
+  cursorColumn: number;
 }
 
 /** What the renderer sends to save a session; main validates every field and drops what it does not accept. */
@@ -572,6 +584,56 @@ interface CpSpellCheckResult {
   misspelled: CpSpellMisspelling[];
 }
 
+// ---------- Large files (main-side sessions behind opaque handles) ----------
+// CpLargeAnchor, CpLargeSeek and CpLargeReadOnlyReason are declared in large-core.d.ts.
+
+type CpLargeCode =
+  | 'ENOENT' | 'EACCES' | 'EPERM' | 'EEXIST' | 'EIO'
+  | 'badHandle' | 'limit' | 'binary' | 'invalid' | 'stale' | 'busy' | 'tooLarge'
+  | 'readOnly' | 'changed' | 'noSpace' | 'lossy' | 'cancelled';
+/** `message` is meant for the user and never names a path. */
+type CpLargeResult<T extends object = object> = ({ ok: true } & T) | { ok: false; code: CpLargeCode; message: string };
+type CpLargeDiskKind = 'same' | 'appended' | 'replaced' | 'modified' | 'deleted';
+type CpLargeTarget =
+  | { to: 'start' } | { to: 'end' }
+  | { to: 'anchor'; anchor: CpLargeAnchor }
+  | { to: 'line'; line: number }                      // 1-based doc line (edits included)
+  | { to: 'byte'; byte: number }
+  | { to: 'permille'; permille: number }              // 0..1000
+  | { to: 'relative'; windowId: number; modelLine: number };
+interface CpLargeWindowRequest { reqId: number; target: CpLargeTarget; place: 'top' | 'center' }
+interface CpLargeIndexInfo {
+  bytes: number; lines: number; done: boolean; totalLines: number | null; estimatedLines: number;
+}
+interface CpLargeWindow {
+  windowId: number; revision: number;
+  text: string;                                        // '\n' breaks
+  byteStart: number; byteEnd: number;
+  firstLine: number; firstLineExact: boolean;
+  continuation: number[]; segmentBytes: number[];
+  anchorModelLine: number;
+  atStart: boolean; atEnd: boolean;
+  readOnly: CpLargeReadOnlyReason | null;
+  index: CpLargeIndexInfo;
+}
+interface CpLargeOpenOk {
+  handle: string; size: number; mtimeMs: number;
+  encoding: string; replaced: boolean; eol: 'lf' | 'crlf' | 'cr'; seek: CpLargeSeek;
+  window: CpLargeWindow;
+}
+interface CpLargeFindQuery { text: string; matchCase: boolean; wholeWord: boolean; regex: boolean }   // text 1..1000 chars
+interface CpLargeMatch { anchor: CpLargeAnchor; line: number; lineExact: boolean; column: number; length: number }
+type CpLargeEvent = { handle: string } & (
+  | ({ type: 'index' } & CpLargeIndexInfo)
+  | { type: 'progress'; reqId: number; job: 'find' | 'count' | 'save' | 'line'; permille: number }
+  | { type: 'disk'; kind: CpLargeDiskKind; size: number; mtimeMs: number }
+  | { type: 'closed'; code: CpLargeCode });
+/** A save refused because characters cannot be represented in the encoding (nothing was written). */
+interface CpLargeLossy { ok: false; code: 'lossy'; message: string; firstBad: number; badChar: string }
+type CpLargeSaveResult = CpLargeResult<CpFileStamp> | CpLargeLossy;
+interface CpLargeSaveOptions { allowLossy: boolean; overwriteReplaced: boolean }
+interface CpLargeCommit { windowId: number; revision: number; text: string }
+
 // ---------- Channel contract ----------
 
 interface CpChannel<A extends unknown[], R> {
@@ -685,6 +747,45 @@ interface CpIpcChannels {
   'ai:models:consent': CpChannel<[id: string, granted?: boolean], CpAiResult>;
   'ai:models:pull': CpChannel<[request: CpAiPullRequest], CpAiResult>;
   'ai:models:pull:cancel': CpChannel<[modelName: string], boolean>;
+
+  /** `path` must already be approved; every other `large:*` call takes only the opaque handle it returns. */
+  'large:open': CpChannel<[path: string, options?: { encoding?: string | null }], CpLargeResult<CpLargeOpenOk>>;
+  'large:window': CpChannel<[handle: string, request: CpLargeWindowRequest], CpLargeResult<{ window: CpLargeWindow }>>;
+  'large:locate': CpChannel<
+    [handle: string, windowId: number, modelLine: number],
+    CpLargeResult<{ anchor: CpLargeAnchor; line: number; exact: boolean; byte: number }>
+  >;
+  'large:commit': CpChannel<
+    [handle: string, commit: CpLargeCommit],
+    CpLargeResult<{ changed: boolean; revision: number; dirty: boolean; window: CpLargeWindow }>
+  >;
+  'large:undo': CpChannel<
+    [handle: string],
+    CpLargeResult<{ anchor: CpLargeAnchor; revision: number; dirty: boolean } | { empty: true }>
+  >;
+  'large:redo': CpChannel<
+    [handle: string],
+    CpLargeResult<{ anchor: CpLargeAnchor; revision: number; dirty: boolean } | { empty: true }>
+  >;
+  'large:find': CpChannel<
+    [handle: string, reqId: number, query: CpLargeFindQuery, from: CpLargeAnchor, direction: 'next' | 'prev', wrap: boolean],
+    CpLargeResult<{ match: CpLargeMatch | null; wrapped: boolean }>
+  >;
+  'large:count': CpChannel<
+    [handle: string, reqId: number, query: CpLargeFindQuery],
+    CpLargeResult<{ count: number; capped: boolean }>
+  >;
+  'large:cancel': CpChannel<[handle: string, reqId: number], boolean>;
+  'large:save': CpChannel<[handle: string, reqId: number, options: CpLargeSaveOptions], CpLargeSaveResult>;
+  'large:saveAs': CpChannel<
+    [handle: string, reqId: number, targetPath: string, options: { allowLossy: boolean }],
+    CpLargeSaveResult
+  >;
+  'large:refresh': CpChannel<
+    [handle: string],
+    CpLargeResult<{ kind: CpLargeDiskKind; size: number; mtimeMs: number }>
+  >;
+  'large:close': CpChannel<[handle: string], boolean>;
 }
 
 /** A function that invokes channel `C`. */
@@ -803,6 +904,22 @@ interface CodePadApi {
       pull: CpInvoke<'ai:models:pull'>;
       cancelPull: CpInvoke<'ai:models:pull:cancel'>;
     };
+  };
+  large: {
+    open: CpInvoke<'large:open'>;
+    window: CpInvoke<'large:window'>;
+    locate: CpInvoke<'large:locate'>;
+    commit: CpInvoke<'large:commit'>;
+    undo: CpInvoke<'large:undo'>;
+    redo: CpInvoke<'large:redo'>;
+    find: CpInvoke<'large:find'>;
+    count: CpInvoke<'large:count'>;
+    cancel: CpInvoke<'large:cancel'>;
+    save: CpInvoke<'large:save'>;
+    saveAs: CpInvoke<'large:saveAs'>;
+    refresh: CpInvoke<'large:refresh'>;
+    close: CpInvoke<'large:close'>;
+    onEvent: CpSubscribe<CpLargeEvent>;
   };
   onCommand: CpSubscribe<CpCommandEvent>;
   onOpenPaths: CpSubscribe<CpOpenPathsEvent>;

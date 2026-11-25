@@ -65,19 +65,19 @@ const commands: CommandEntry[] = [
   { id: 'sessions.delete', title: 'Delete Session...', menu: 'File/Sessions', order: 30, when: 'any' },
 
   // Compare (Monaco diff editor in a 'diff' tab).
-  { id: 'compare.withTab', title: 'Compare with Open Tab...', menu: 'Tools/Compare', order: 10 },
-  { id: 'compare.withDisk', title: 'Compare with Saved File on Disk', menu: 'Tools/Compare', order: 20 },
-  { id: 'compare.withClipboard', title: 'Compare with Clipboard', menu: 'Tools/Compare', order: 30 },
+  { id: 'compare.withTab', title: 'Compare with Open Tab...', menu: 'Tools/Compare', order: 10, large: 'off' },
+  { id: 'compare.withDisk', title: 'Compare with Saved File on Disk', menu: 'Tools/Compare', order: 20, large: 'off' },
+  { id: 'compare.withClipboard', title: 'Compare with Clipboard', menu: 'Tools/Compare', order: 30, large: 'off' },
   { id: 'compare.next', title: 'Next Difference', menu: 'Tools/Compare', order: 40, separatorBefore: true, when: 'any' },
   { id: 'compare.prev', title: 'Previous Difference', menu: 'Tools/Compare', order: 50, when: 'any' },
   { id: 'compare.clear', title: 'Clear Compare (Close Diff Tab)', menu: 'Tools/Compare', order: 60, when: 'any' },
 
   // Macros.
   { id: 'macro.toggleRecord', title: 'Start / Stop Recording', menu: 'Macro', order: 10, accelerator: 'CmdOrCtrl+Shift+R', when: 'any' },
-  { id: 'macro.playback', title: 'Playback', menu: 'Macro', order: 20, accelerator: 'F9' },
-  { id: 'macro.runMultiple', title: 'Run a Macro Multiple Times...', menu: 'Macro', order: 30 },
-  { id: 'macro.runToEnd', title: 'Run Macro Until End of File', menu: 'Macro', order: 40 },
-  { id: 'macro.run', title: 'Run Saved Macro...', menu: 'Macro', order: 50, separatorBefore: true },
+  { id: 'macro.playback', title: 'Playback', menu: 'Macro', order: 20, accelerator: 'F9', large: 'ok' },
+  { id: 'macro.runMultiple', title: 'Run a Macro Multiple Times...', menu: 'Macro', order: 30, large: 'off' },
+  { id: 'macro.runToEnd', title: 'Run Macro Until End of File', menu: 'Macro', order: 40, large: 'off' },
+  { id: 'macro.run', title: 'Run Saved Macro...', menu: 'Macro', order: 50, separatorBefore: true, large: 'ok' },
   { id: 'macro.save', title: 'Save Current Recorded Macro...', menu: 'Macro', order: 60, when: 'any' },
   { id: 'macro.delete', title: 'Delete Saved Macro...', menu: 'Macro', order: 70, when: 'any' }
 ];

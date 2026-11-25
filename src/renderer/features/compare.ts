@@ -205,6 +205,10 @@
       app().status.set('Comparing needs an active text tab.');
       return null;
     }
+    if (app().large.isLarge(tab)) {
+      app().large.notAvailable(tab, 'Compare');
+      return null;
+    }
     return tab;
   }
 
@@ -213,9 +217,9 @@
     if (!left) {
       return;
     }
-    const others = app().tabs.list().filter((tab) => tab !== left && tab.kind === 'text');
+    const others = app().tabs.list().filter((tab) => tab !== left && tab.kind === 'text' && !app().large.isLarge(tab));
     if (others.length === 0) {
-      app().status.set('There is no other text tab to compare with.');
+      app().status.set('There is no other text tab to compare with (large files cannot be compared).');
       return;
     }
     const id = await app().ui.pick({

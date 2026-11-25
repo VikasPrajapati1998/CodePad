@@ -8,7 +8,7 @@ const commands: CommandEntry[] = [
   { id: 'search.toggleResults', title: 'Toggle Search Results', menu: 'Search', order: 60, separatorBefore: true, accelerator: 'F7', when: 'any' },
   { id: 'search.nextResult', title: 'Next Search Result', menu: 'Search', order: 70, accelerator: 'F4', when: 'any' },
   { id: 'search.prevResult', title: 'Previous Search Result', menu: 'Search', order: 80, accelerator: 'Shift+F4', when: 'any' },
-  { id: 'search.gotoOffset', title: 'Go to Offset...', menu: 'Search', order: 90, separatorBefore: true },
+  { id: 'search.gotoOffset', title: 'Go to Offset...', menu: 'Search', order: 90, separatorBefore: true, large: 'ok' },
   { id: 'search.selectBetweenBrackets', title: 'Select Between Brackets', menu: 'Search', order: 100 },
   { id: 'search.findNonAscii', title: 'Find Non-ASCII Characters', menu: 'Search', order: 110 },
 

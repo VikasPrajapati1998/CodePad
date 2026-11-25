@@ -9,6 +9,10 @@
       ctx.status.set('Versions need an active text tab.');
       return null;
     }
+    if (ctx.large.isLarge(tab)) {
+      ctx.large.notAvailable(tab, 'Version history');
+      return null;
+    }
     return tab;
   }
 

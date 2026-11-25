@@ -324,6 +324,16 @@
     return tab ? [tab] : [];
   }
 
+  const LARGE_SEARCH_NOTE = 'Skipped 1 large file. Use Find in the file (Ctrl+F) for large files.';
+
+  /** Large tabs only hold a window of their file, so whole-tab searches skip them. */
+  function withoutLarge(tabs: CodePadTextTab[]): { tabs: CodePadTextTab[]; skipped: number } {
+    const kept = tabs.filter((tab) => !app().large.isLarge(tab));
+    return { tabs: kept, skipped: tabs.length - kept.length };
+  }
+
+  const skippedNote = (skipped: number): string => (skipped > 0 ? ` Skipped ${skipped} large file${skipped === 1 ? '' : 's'}.` : '');
+
   function cancelRunning(): void {
     if (!running) return;
     const state = running;
@@ -414,14 +424,14 @@
       findInFolder(o);
       return;
     }
-    const tabs = tabsForScope(o);
+    const { tabs, skipped } = withoutLarge(tabsForScope(o));
     if (tabs.length === 0) {
-      app().status.set('No text tab to search.');
+      app().status.set(skipped > 0 ? LARGE_SEARCH_NOTE : 'No text tab to search.');
       return;
     }
     const set = searchTabs(o, matcher, tabs);
     window.CodePadSearchResults.show(set);
-    app().status.set(`${set.totals.matches} match(es) in ${set.totals.files} tab(s).`);
+    app().status.set(`${set.totals.matches} match(es) in ${set.totals.files} tab(s).${skippedNote(skipped)}`);
   }
 
   function countMatches(o: CodePadSearchOptions): void {
@@ -430,15 +440,15 @@
       app().status.set(matcher.error);
       return;
     }
-    const tabs = o.scope === 'tabs' ? textTabs() : tabsForScope({ scope: 'tab' });
+    const { tabs, skipped } = withoutLarge(o.scope === 'tabs' ? textTabs() : tabsForScope({ scope: 'tab' }));
     if (tabs.length === 0) {
-      app().status.set('No text tab to search.');
+      app().status.set(skipped > 0 ? LARGE_SEARCH_NOTE : 'No text tab to search.');
       return;
     }
     const budget = o.isRegex ? REGEX_TIME_BUDGET_MS : 0;
     let total = 0;
     for (const tab of tabs) total += core.findAll(tab.model.getValue(), matcher, { timeBudgetMs: budget }).length;
-    app().status.set(`${total} match(es) in ${tabs.length === 1 ? tabs[0].name : tabs.length + ' tabs'}.`);
+    app().status.set(`${total} match(es) in ${tabs.length === 1 ? tabs[0].name : tabs.length + ' tabs'}.${skippedNote(skipped)}`);
   }
 
   async function replaceInTabs(o: CodePadSearchOptions): Promise<void> {
@@ -462,7 +472,8 @@
     const plan: ReplacePlanEntry[] = [];
     let total = 0;
     let readOnly = 0;
-    for (const tab of tabsForScope(o)) {
+    const { tabs: candidates, skipped } = withoutLarge(tabsForScope(o));
+    for (const tab of candidates) {
       if (tab.persist && tab.persist.readOnly) {
         readOnly++;
         continue;
@@ -472,7 +483,7 @@
       plan.push({ tab, found, version: tab.model.getVersionId() });
       total += found.length;
     }
-    const note = readOnly ? ` (${readOnly} read-only tab(s) skipped)` : '';
+    const note = (readOnly ? ` (${readOnly} read-only tab(s) skipped)` : '') + skippedNote(skipped);
     if (total === 0) {
       app().status.set('No matches to replace' + note + '.');
       return;
@@ -517,6 +528,12 @@
     const offset = parseOffset(value);
     if (Number.isNaN(offset)) {
       app().status.set('Enter a decimal number or a 0x hex number.');
+      return;
+    }
+    const active = app().tabs.active();
+    if (app().large.isLarge(active)) {
+      // In a large file the offset is a byte position of the file, not a position in the loaded window.
+      await app().large.goTo(active, { byte: offset });
       return;
     }
     const model = app().editor.getModel();

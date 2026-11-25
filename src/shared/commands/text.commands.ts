@@ -16,6 +16,9 @@
   const group = (menu: string, rows: Array<[string, string, Partial<CommandEntry>?]>): CommandEntry[] =>
     rows.map(([id, title, extra], i) => Object.assign({ id, title, menu, order: (i + 1) * 10 }, extra));
 
+  /** Marks entries that may run on a large tab (they work on the selection inside the loaded part). */
+  const largeOk = (entries: CommandEntry[]): CommandEntry[] => entries.map((entry): CommandEntry => ({ ...entry, large: 'ok' }));
+
   const sortRows: Array<[string, string, Partial<CommandEntry>?]> = [
     ['text.sortAsc', 'Sort Lines Ascending'],
     ['text.sortDesc', 'Sort Lines Descending'],
@@ -46,30 +49,30 @@
     ]),
     ...group(SORT, sortRows),
     ...group(CASE, [
-      ['text.upper', 'Convert to UPPERCASE', { accelerator: 'CmdOrCtrl+Shift+U' }],
-      ['text.lower', 'Convert to lowercase'],
-      ['text.proper', 'Convert to Proper Case'],
-      ['text.sentence', 'Convert to Sentence case'],
-      ['text.invert', 'Invert Case'],
+      ['text.upper', 'Convert to UPPERCASE', { accelerator: 'CmdOrCtrl+Shift+U', large: 'ok' }],
+      ['text.lower', 'Convert to lowercase', { large: 'ok' }],
+      ['text.proper', 'Convert to Proper Case', { large: 'ok' }],
+      ['text.sentence', 'Convert to Sentence case', { large: 'ok' }],
+      ['text.invert', 'Invert Case', { large: 'ok' }],
       ['text.random', 'Convert to rAnDoM cAsE'],
     ]),
-    ...group(BLANK, [
+    ...largeOk(group(BLANK, [
       ['text.trimTrailing', 'Trim Trailing Space'],
       ['text.trimLeading', 'Trim Leading Space'],
       ['text.trimBoth', 'Trim Leading and Trailing Space'],
       ['text.tabsToSpaces', 'TAB to Space', { separatorBefore: true }],
       ['text.spacesToTabsLeading', 'Space to TAB (Leading)'],
       ['text.spacesToTabsAll', 'Space to TAB (All)'],
-    ]),
-    ...group(DATE, [
+    ])),
+    ...largeOk(group(DATE, [
       ['text.insertDateShort', 'Insert Date and Time (Short)', { accelerator: 'F5' }],
       ['text.insertDateLong', 'Insert Date and Time (Long)', { accelerator: 'Shift+F5' }],
       ['text.insertDateCustom', 'Insert Date and Time (Custom)...'],
-    ]),
-    { id: 'text.columnEditor', title: 'Column Editor...', menu: 'Edit', order: 900, separatorBefore: true, accelerator: 'Alt+Shift+C' },
+    ])),
+    { id: 'text.columnEditor', title: 'Column Editor...', menu: 'Edit', order: 900, separatorBefore: true, accelerator: 'Alt+Shift+C', large: 'ok' },
     { id: 'clipboard.history', title: 'Clipboard History', menu: 'Edit', order: 910, accelerator: 'CmdOrCtrl+Shift+H', when: 'any' },
     { id: 'text.redact', title: 'Redact Selection', menu: 'Edit', order: 920 },
-    ...group(CONVERT, [
+    ...largeOk(group(CONVERT, [
       ['conv.base64Encode', 'Base64 Encode'],
       ['conv.base64EncodeUrl', 'Base64 Encode (URL-safe)'],
       ['conv.base64EncodeWrapped', 'Base64 Encode (76-column lines)'],
@@ -78,21 +81,21 @@
       ['conv.urlDecode', 'URL Decode'],
       ['conv.asciiToHex', 'ASCII to Hex', { separatorBefore: true }],
       ['conv.hexToAscii', 'Hex to ASCII'],
-    ]),
-    ...group('Tools/JSON', [
+    ])),
+    ...largeOk(group('Tools/JSON', [
       ['json.pretty', 'Pretty-Print JSON'],
       ['json.minify', 'Minify JSON'],
       ['json.validate', 'Validate JSON'],
-    ]),
-    ...group('Tools/XML', [
+    ])),
+    ...largeOk(group('Tools/XML', [
       ['xml.pretty', 'Pretty-Print XML'],
       ['xml.minify', 'Minify XML'],
       ['xml.validate', 'Validate XML'],
-    ]),
+    ])),
     ...group(HASH, [
-      ['hash.selection', 'Hash of Selection...'],
+      ['hash.selection', 'Hash of Selection...', { large: 'ok' }],
       ['hash.tab', 'Hash of Tab Text...'],
-      ['hash.currentFile', 'Hash of Current File on Disk...', { when: 'any' }],
+      ['hash.currentFile', 'Hash of Current File on Disk...', { when: 'any', large: 'ok' }],
       ['hash.file', 'Hash of Open or Recent File...', { when: 'any' }],
     ]),
   ];

@@ -168,6 +168,102 @@ function detect(buffer: Buffer, { fallback = 'windows-1252' }: CodecOptions = {}
   }
 }
 
+/** Options of `detectSample`. */
+export interface SampleOptions extends CodecOptions {
+  /** True when the sample is only the start of a longer file, so it may end inside a UTF-8 character. */
+  truncated: boolean;
+}
+
+/** Length of the UTF-8 sequence a lead byte starts, or 1 for ASCII and continuation/invalid bytes. */
+function utf8SequenceLength(lead: number): number {
+  if (lead >= 0xf0 && lead <= 0xf7) {
+    return 4;
+  }
+  if (lead >= 0xe0) {
+    return lead <= 0xef ? 3 : 1;
+  }
+  return lead >= 0xc0 && lead <= 0xdf ? 2 : 1;
+}
+
+/**
+ * Like `detect` for the first bytes of a large file: a UTF-8 sequence cut off by the end of the sample is dropped
+ * before the strict check, so a sample ending inside a character is not mistaken for the fallback encoding.
+ * @param sample The first bytes of the file.
+ */
+function detectSample(sample: Buffer, { truncated, fallback }: SampleOptions): DetectedEncoding {
+  let end = sample.length;
+  if (truncated) {
+    for (let back = 1; back <= 3 && back <= end; back += 1) {
+      const lead = sample[end - back];
+      if (lead >= 0xc0) {
+        if (utf8SequenceLength(lead) > back) {
+          end -= back;
+        }
+        break;
+      }
+      if (lead < 0x80) {
+        break;
+      }
+    }
+  }
+  return detect(sample.subarray(0, end), { fallback });
+}
+
+/** What the large-file reader needs to know to step through an encoding. */
+export interface SeekInfo {
+  /** Bytes per code unit (2 for UTF-16). */
+  unit: 1 | 2;
+  bigEndian: boolean;
+  /** `char`: decoding can start at any character boundary; `lineStart`: only at a line start. */
+  seek: CpLargeSeek;
+  kind: 'utf8' | 'utf16le' | 'utf16be' | 'single' | 'multi';
+}
+
+/** Legacy encodings whose characters have two or more bytes; LF and CR never occur inside one. */
+const MULTI_BYTE = new Set(['gbk', 'gb18030', 'big5', 'shift_jis', 'euc-jp', 'euc-kr']);
+
+/** How to step through the bytes of a known encoding (see `SeekInfo`). */
+function seekKind(encodingId: string): SeekInfo {
+  if (encodingId === 'utf8' || encodingId === 'utf8bom') {
+    return { unit: 1, bigEndian: false, seek: 'char', kind: 'utf8' };
+  }
+  if (encodingId === 'utf16le') {
+    return { unit: 2, bigEndian: false, seek: 'char', kind: 'utf16le' };
+  }
+  if (encodingId === 'utf16be') {
+    return { unit: 2, bigEndian: true, seek: 'char', kind: 'utf16be' };
+  }
+  if (MULTI_BYTE.has(encodingId)) {
+    return { unit: 1, bigEndian: false, seek: 'lineStart', kind: 'multi' };
+  }
+  return { unit: 1, bigEndian: false, seek: 'char', kind: 'single' };
+}
+
+/** Length of the BOM a file in this encoding starts with when `bytes` begins with one (0 otherwise). */
+function bomLength(encodingId: string, bytes: Buffer): number {
+  if (encodingId === 'utf8bom' && bytes.subarray(0, 3).equals(UTF8_BOM)) {
+    return 3;
+  }
+  if (encodingId === 'utf16le' && bytes.subarray(0, 2).equals(UTF16LE_BOM)) {
+    return 2;
+  }
+  if (encodingId === 'utf16be' && bytes.subarray(0, 2).equals(UTF16BE_BOM)) {
+    return 2;
+  }
+  return 0;
+}
+
+/** Exact number of bytes `text` takes in the encoding, without a BOM. */
+function byteLength(text: string, encodingId: string): number {
+  if (encodingId === 'utf8' || encodingId === 'utf8bom') {
+    return Buffer.byteLength(text, 'utf8');
+  }
+  if (isUtf16(encodingId)) {
+    return text.length * 2;
+  }
+  return encode(text, encodingId).length;
+}
+
 function stripBom(buffer: Buffer, bom: Buffer): Buffer {
   return buffer.subarray(0, bom.length).equals(bom) ? buffer.subarray(bom.length) : buffer;
 }
@@ -309,6 +405,10 @@ export {
   isLegacyEncoding,
   isUtf16,
   detect,
+  detectSample,
+  seekKind,
+  bomLength,
+  byteLength,
   decode,
   encode,
   checkEncodable,

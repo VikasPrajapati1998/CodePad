@@ -70,7 +70,29 @@ function normalizeBookmarks(raw: unknown): number[] {
   return [...new Set(lines)].sort((a, b) => a - b).slice(0, MAX_BOOKMARKS);
 }
 
-const normalizeColor = (value: unknown): number => (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_COLOR ? value : 0);
+const MAX_LARGE_CURSOR = 10000000;
+
+const isNonNegativeSafe = (value: unknown, max: number): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max;
+
+/** Validates where a large-file tab was scrolled to; null when any number is missing or out of range. */
+function normalizeLarge(raw: unknown): CpSessionLarge | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const { byte, sub, cursorLine, cursorColumn } = raw;
+  if (
+    !isNonNegativeSafe(byte, Number.MAX_SAFE_INTEGER) ||
+    !isNonNegativeSafe(sub, MAX_LARGE_CURSOR) ||
+    !isNonNegativeSafe(cursorLine, MAX_LARGE_CURSOR) ||
+    !isNonNegativeSafe(cursorColumn, MAX_LARGE_CURSOR)
+  ) {
+    return null;
+  }
+  return { byte, sub, cursorLine, cursorColumn };
+}
+
+const normalizeColor =(value: unknown): number => (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_COLOR ? value : 0);
 
 function normalizeTab(value: unknown): NormalizedTab | null {
   if (!value || typeof value !== 'object') {
@@ -94,16 +116,19 @@ function normalizeTab(value: unknown): NormalizedTab | null {
     readOnly: raw.readOnly === true,
   };
   if (isText) {
+    // A large-file tab is restored from its file (it needs a path); it never carries text or a Monaco view state.
+    const large = filePath === null ? null : normalizeLarge(raw.large);
     Object.assign(tab, {
       encoding: textCodec.isKnownEncoding(raw.encoding) ? raw.encoding : 'utf8',
       eol: isEol(raw.eol) ? raw.eol : null,
       language: typeof raw.language === 'string' ? raw.language.slice(0, MAX_LANGUAGE_LENGTH) : null,
       autoDetect: raw.autoDetect === true,
       // null = the tab matches the file on disk; a string = unsaved text to restore.
-      content: typeof raw.content === 'string' ? raw.content : null,
-      viewState: normalizeViewState(raw.viewState),
+      content: !large && typeof raw.content === 'string' ? raw.content : null,
+      viewState: large ? null : normalizeViewState(raw.viewState),
       monitor: raw.monitor === true,
-      bookmarks: normalizeBookmarks(raw.bookmarks),
+      bookmarks: large ? [] : normalizeBookmarks(raw.bookmarks),
+      ...(large ? { large } : {}),
     });
   }
   return tab;

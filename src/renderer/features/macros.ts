@@ -240,6 +240,10 @@
       app().status.set(recording ? 'Stop recording before playing a macro.' : 'A macro is already playing.');
       return;
     }
+    if (mode.toEnd && app().large.isLarge(tab)) {
+      app().large.notAvailable(tab, 'Running a macro to the end of the file');
+      return;
+    }
     playing = true;
     cancelRequested = false;
     window.addEventListener('keydown', onPlaybackKey, true);

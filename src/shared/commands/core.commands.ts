@@ -12,9 +12,9 @@ const commands: CommandEntry[] = [
   { id: 'app.quit', title: 'Quit', menu: 'File', order: 1000, separatorBefore: true, role: 'quit', platforms: ['win32', 'linux'], palette: false },
 
   { id: 'edit.palette', title: 'Command Palette...', menu: 'Edit', order: 1, accelerator: 'CmdOrCtrl+Shift+P', palette: false },
-  { id: 'edit.gotoLine', title: 'Go to Line...', menu: 'Edit', order: 2, accelerator: 'CmdOrCtrl+G' },
+  { id: 'edit.gotoLine', title: 'Go to Line...', menu: 'Edit', order: 2, accelerator: 'CmdOrCtrl+G', large: 'ok' },
   { id: 'edit.find', title: 'Find', menu: 'Edit', order: 3, accelerator: 'CmdOrCtrl+F', when: 'any' },
-  { id: 'edit.replace', title: 'Replace', menu: 'Edit', order: 4, accelerator: 'CmdOrCtrl+H' },
+  { id: 'edit.replace', title: 'Replace', menu: 'Edit', order: 4, accelerator: 'CmdOrCtrl+H', large: 'ok' },
 
   { id: 'view.toggleSidebar', title: 'Toggle Sidebar', menu: 'View', order: 1, accelerator: 'CmdOrCtrl+B', checkedSetting: 'ui.sidebar', when: 'any' },
   { id: 'view.toggleMinimap', title: 'Toggle Minimap', menu: 'View', order: 2, checkedSetting: 'ui.minimap', when: 'any' },

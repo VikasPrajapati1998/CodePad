@@ -34,7 +34,7 @@ export interface MenuContext {
 }
 
 // One static table per module; main only ever sends ids from these tables to the renderer.
-const TABLE_MODULES = ['core', 'search', 'text', 'view', 'tabs', 'ai'];
+const TABLE_MODULES = ['core', 'search', 'text', 'view', 'tabs', 'ai', 'large'];
 const ROOTS = [
   ['File', '&File'],
   ['Edit', '&Edit'],
@@ -91,14 +91,17 @@ function effectiveAccelerator(entry: CommandEntry, keybindings: Record<string, s
   return entry.accelerator || '';
 }
 
+/** A table row for the renderer: `large` is the effective large-file gate (explicit, else off for `when: 'text'`). */
+type TableInfo = CpCommandInfo & { large: 'ok' | 'off' };
+
 /**
  * The command table as the renderer sees it (keybinding overrides applied; Electron roles are left out).
  * @param keybindings The `keybindings` setting.
  */
-function effectiveTable(keybindings: Record<string, string>): CpCommandInfo[] {
+function effectiveTable(keybindings: Record<string, string>): TableInfo[] {
   return loadTable()
     .filter((entry) => !entry.role)
-    .map((entry) => ({
+    .map((entry): TableInfo => ({
       id: entry.id,
       title: entry.title,
       menu: entry.menu || '',
@@ -106,6 +109,7 @@ function effectiveTable(keybindings: Record<string, string>): CpCommandInfo[] {
       defaultAccelerator: entry.accelerator || '',
       when: entry.when,
       palette: entry.palette !== false,
+      large: entry.large ?? (entry.when === 'text' ? 'off' : 'ok'),
     }));
 }
 

@@ -212,9 +212,54 @@ body.cp-resizing { user-select: none; }
 #new-tab:hover,
 #close-all-tabs:hover { background: var(--bg-hover); color: var(--fg); }
 
-#editor { flex: 1; min-height: 0; }
+#editor { flex: 1; min-height: 0; position: relative; }
+/* A large tab swaps Monaco's scrollbar for the file scrollbar, which sits in the strip freed at the right. */
+#editor.large { margin-right: 14px; }
 #editor.hidden { visibility: hidden; }
 #editor.inactive { display: none; }
+
+/* File scrollbar of large tabs: the thumb position is the byte position of the top visible line. */
+#large-scroll {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -14px;
+  width: 14px;
+  z-index: 5;
+  background: var(--bg-side);
+  border-left: 1px solid var(--border);
+  user-select: none;
+  touch-action: none;
+}
+#large-scroll[hidden] { display: none; }
+#large-scroll .large-thumb {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 0;
+  min-height: 24px;
+  border-radius: 3px;
+  background: var(--fg-dim);
+  opacity: 0.55;
+  cursor: grab;
+}
+#large-scroll .large-thumb:hover,
+#large-scroll.dragging .large-thumb { opacity: 0.85; }
+#large-scroll.dragging .large-thumb { cursor: grabbing; }
+#large-scroll .large-tip {
+  position: absolute;
+  right: 18px;
+  top: 0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#large-scroll .large-tip[hidden] { display: none; }
 
 /* Non-text tabs (docx, sheet, pdf): one host per tab, only the active one is shown. */
 #views { flex: 1; min-height: 0; position: relative; }
@@ -267,6 +312,7 @@ kbd {
 }
 #statusbar button:hover, #statusbar select:hover { background: rgba(255, 255, 255, 0.15); }
 #statusbar select option { background: var(--bg-side); color: var(--fg); }
+.cp-status-item[data-state='warn'] { color: #f0c674; }
 
 /* Text-only status items are meaningless for document tabs, which show their own info instead. */
 #status-info { display: none; }

@@ -317,6 +317,13 @@
         message('Outline is available for text files.');
         return;
       }
+      if (ctx.large.isLarge(tab)) {
+        requestId += 1;
+        symbols = [];
+        ctx.panels.setBadge('outline', '');
+        message('Outline is not available for large files.');
+        return;
+      }
       const id = ++requestId;
       let result: OutlineSymbol[];
       try {

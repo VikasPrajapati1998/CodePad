@@ -41,7 +41,8 @@
 
   function activeTab(): CodePadTextTab | null {
     const tab = app().tabs.active();
-    return tab && tab.kind === 'text' && tab.model ? tab : null;
+    // Bookmarks and marks need the whole document; a large tab only holds a window of it (the command gate says so).
+    return tab && tab.kind === 'text' && tab.model && !app().large.isLarge(tab) ? tab : null;
   }
 
   function editableTab(): CodePadTextTab | null {
@@ -192,7 +193,7 @@
   }
 
   function restoreBookmarks(tab: CodePadTab): void {
-    if (tab.kind !== 'text' || !tab.model || !tab.persist || !Array.isArray(tab.persist.bookmarks)) return;
+    if (tab.kind !== 'text' || !tab.model || !tab.persist || !Array.isArray(tab.persist.bookmarks) || app().large.isLarge(tab)) return;
     if (tab.persist.bookmarks.length > 0) setBookmarks(tab, tab.persist.bookmarks);
   }
 

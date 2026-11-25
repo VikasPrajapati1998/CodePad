@@ -17,6 +17,8 @@ CodePad/
 ├── menuBuilder.js      # Loads the static command tables, applies keybinding overrides, builds the native menu (checkbox settings, recent files submenu, roles)
 ├── findInFiles.js      # Find in Files driver: validates options, runs findInFilesWorker.js in a worker thread, watchdog, cancel
 ├── findInFilesWorker.js# Worker thread that walks the opened folder (never follows symlinks) and matches with shared/searchCore.js
+├── largeFile.js        # Large-file sessions (main): opaque handles, window reads, line index, edit overlay, find/count, streaming save; never loads the whole file
+├── largeFileWorker.js  # Worker thread of a large file: background index scan, find, count
 ├── fileWatcher.js      # Per-directory fs.watch manager for "changed on disk" (debounced, allow-listed, ref-counted)
 ├── preload.js          # contextBridge API (window.codepad, incl. window.codepad.ai) exposed to the sandboxed renderer
 ├── preloadInstall.js   # Preload of the model-install window only (progress in, cancel out)
@@ -57,6 +59,9 @@ CodePad/
 │   ├── docModel.js         # Pure UMD `CodePadDocModel`: blocks with stable ids, sections, places named in words (parseRef/resolve), outline
 │   ├── docOps.js           # Pure UMD `CodePadDocOps`: structured, version-checked, atomic document operations; line diff and partial apply of accepted hunks
 │   ├── chunker.js          # Pure UMD `CodePadChunker`: token estimate, model budget, heading/paragraph/sentence-aware chunks with overlap, merge
+│   ├── lineIndex.js        # Pure UMD `CodePadLineIndex`: sparse line-start index (LF/CRLF/CR, UTF-8/UTF-16), offset<->line, rebase after edits
+│   ├── editOverlay.js      # Pure UMD `CodePadEditOverlay`: replacements keyed by original byte ranges, undo/redo, save plan
+│   ├── largeWindow.js      # Pure UMD `CodePadLargeWindow`: window diff/shift/scrollbar math, line labels
 │   ├── markdown.js         # Pure UMD `CodePadMarkdown`: bounded Markdown parser to a node tree (no HTML), safe link filter; used by the Read Mode preview
 │   ├── searchCore.js       # Pure search/replace engine (extended mode, whole word, regex) shared by Find in Files and tab search
 │   └── commands/           # Static command tables: id, title, menu path, order, accelerator, when. Main builds the menu from them
@@ -111,6 +116,8 @@ Renderer (ctx.ai)  --ai:* IPC-->  main: aiIpc.js --> modelDownloader.js (net, fs
 All model downloading is in main (`modelDownloader.js`); the worker has a network kill-switch and the renderer has no network. `main.js --install-model [--silent]` runs only the downloader (optional progress window `renderer/install/`, `preloadInstall.js`, channels `install:progress`/`install:cancel`) and exits with a code for the installer. The settings `ai.*` and `editor.autoSuggest` are in the shared schema; main gives aiIpc a settings view where `ai.autoDownload` is false until `ai.setupPrompted` is true (first-launch gate answered).
 
 ## Tab kinds
+
+A text tab over 20 MB is a large tab (`tab.large`, model = the current window, `ctx.large` capability API from `renderer/core/largeTabs.js`); whole-document features check `ctx.large.isLarge` and the command tables carry a `large: 'ok'|'off'` gate enforced in `core/commands.js`. IPC `large:open/window/locate/commit/undo/redo/find/count/cancel/save/saveAs/refresh/close` (+ `large:event`), all handle-based. Design: `.claude/plans/large-files.md`.
 
 `text` (Monaco model), document kinds `docx`/`sheet`/`pdf` (chosen by extension) and `diff` (compare view, no file, never saved or put in a session). A non-text tab owns a view created by its module (`create({container, bytes | params, ...})`). Every tab has `persist` (pinned, color, readOnly, bookmarks, monitor; not on `diff`) and `diskStat` (mtime/size of the last read or write, used by file watching).
 

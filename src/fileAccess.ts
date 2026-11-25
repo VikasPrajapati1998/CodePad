@@ -1,12 +1,14 @@
 import crypto from 'crypto';
 import fsSync from 'fs';
 import fs from 'fs/promises';
+import type { FileHandle } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { errorCode, isErrnoCode } from './errorUtils';
 import * as textCodec from './textCodec';
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+/** Text files up to this size are read whole by `readTextFile`; bigger ones open through the large-file reader. */
+const FULL_LOAD_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_WRITE_CHARS = 64 * 1024 * 1024;
 const MAX_HASH_BYTES = 2 * 1024 * 1024 * 1024;
 const HASH_ALGORITHMS = new Set(['md5', 'sha1', 'sha256', 'sha384', 'sha512']);
@@ -324,7 +326,7 @@ async function readTextFileImpl(
     if (!stat.isFile()) {
       throw new Error('Not a regular file.');
     }
-    if (stat.size > MAX_FILE_BYTES) {
+    if (stat.size > FULL_LOAD_BYTES) {
       return { path: p, tooLarge: true, size: stat.size };
     }
     // One byte more than the stat said: if it is filled, the file grew after the size check.
@@ -386,6 +388,74 @@ async function writeAtomicImpl(
   return { mtimeMs: stat.mtimeMs, size: stat.size };
 }
 const writeAtomic = bounded(writeAtomicImpl);
+
+/** Where `writeAtomicStream` callers put the bytes of the new file, in order. */
+export interface AtomicOut {
+  write(chunk: Buffer): Promise<void>;
+}
+
+/** Steps around the rename of `writeAtomicStream`; a hook that throws aborts the save and removes the temp file. */
+export interface AtomicStreamHooks {
+  /** Runs after the data is flushed, before anything is closed or renamed (last chance to refuse). */
+  verifyBeforeRename?: () => Promise<void>;
+  /** Runs right before the rename (Windows cannot replace a file that this process still holds open). */
+  closeBeforeRename?: () => Promise<void>;
+}
+
+/**
+ * Like `writeAtomic`, but the content is produced chunk by chunk by `produce` (the original is never truncated).
+ * Errors thrown by `produce` or the hooks pass through unchanged (give them no `code`); filesystem errors are
+ * reduced to fixed codes.
+ * @param real Real target path (from `resolveAllowed`); the temp file is created next to it.
+ */
+async function writeAtomicStreamImpl(
+  real: string,
+  produce: (out: AtomicOut) => Promise<void>,
+  hooks: AtomicStreamHooks = {},
+): Promise<CpFileStamp> {
+  const temp = `${real}.codepad-${process.pid}-${Date.now()}.tmp`;
+  let handle: FileHandle | null = null;
+  try {
+    let mode: number | undefined;
+    try {
+      mode = (await fs.stat(real)).mode;
+    } catch (error) {
+      if (!isErrnoCode(error, 'ENOENT')) {
+        throw error;
+      }
+    }
+    handle = await fs.open(temp, 'wx', mode);
+    const file = handle;
+    await produce({
+      write: async (chunk: Buffer): Promise<void> => {
+        let done = 0;
+        while (done < chunk.length) {
+          const { bytesWritten } = await file.write(chunk, done, chunk.length - done);
+          done += bytesWritten;
+        }
+      },
+    });
+    await file.sync();
+    await file.close();
+    handle = null;
+    if (hooks.verifyBeforeRename) {
+      await hooks.verifyBeforeRename();
+    }
+    if (hooks.closeBeforeRename) {
+      await hooks.closeBeforeRename();
+    }
+    await fs.rename(temp, real);
+  } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+    }
+    await fs.rm(temp, { force: true });
+    throw error;
+  }
+  const stat = await fs.stat(real);
+  return { mtimeMs: stat.mtimeMs, size: stat.size };
+}
+const writeAtomicStream = bounded(writeAtomicStreamImpl);
 
 /**
  * Encodes and writes text.
@@ -557,6 +627,7 @@ const hashFile = bounded(hashFileImpl);
 const readDirectory = bounded(readDirectoryImpl);
 
 export {
+  FULL_LOAD_BYTES,
   approveFile,
   revokeFile,
   approveRoot,
@@ -569,6 +640,7 @@ export {
   assertWindowsSafe,
   isInside,
   writeAtomic,
+  writeAtomicStream,
   readTextFile,
   writeTextFile,
   readBinaryFile,

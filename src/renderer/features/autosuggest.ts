@@ -168,7 +168,7 @@
   function sync(): void {
     const models = new Set<monaco.editor.ITextModel>();
     app().tabs.list().forEach((tab) => {
-      if (tab.kind === 'text' && tab.model && !tab.model.isDisposed()) {
+      if (tab.kind === 'text' && tab.model && !tab.model.isDisposed() && !app().large.isLarge(tab)) {
         models.add(tab.model);
       }
     });
@@ -260,7 +260,9 @@
         });
       }
     });
-    if (prefix !== '' || invoked) {
+    const active = app().tabs.active();
+    const largeModel = app().large.isLarge(active) && active.model === model;
+    if (!largeModel && (prefix !== '' || invoked)) {
       matchingWords(model, prefix).forEach((word, rank) => {
         suggestions.push({
           label: word,

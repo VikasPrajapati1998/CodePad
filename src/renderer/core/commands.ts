@@ -7,8 +7,10 @@
   const NOT_AVAILABLE_MESSAGE = 'Not available for this file type.';
 
   const registry = new Map<string, CodePadCommandDefinition>();
-  /** Table entries sent by main (id -> {title, menu, accelerator, when, palette}). */
-  let table = new Map<string, CpCommandInfo>();
+  /** A table entry as main sends it; `large` is the effective large-file gate (see CommandEntry.large). */
+  type TableRow = CpCommandInfo & { large?: 'ok' | 'off' };
+  /** Table entries sent by main (id -> {title, menu, accelerator, when, palette, large}). */
+  let table = new Map<string, TableRow>();
   const executeListeners = new Set<(command: CodePadExecutedCommand) => void>();
   let context: CodePadCtx | null = null;
   let editor: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -38,6 +40,12 @@
       return entry.when;
     }
     return (def && def.when) || 'any';
+  }
+
+  /** Whether the command may run on a large tab: the table (or definition) says so, else only `when: 'any'` commands may. */
+  function largeOf(id: string): 'ok' | 'off' {
+    const explicit = table.get(id)?.large ?? registry.get(id)?.large;
+    return explicit ?? (whenOf(id) === 'text' ? 'off' : 'ok');
   }
 
   const isPalette = (id: string): boolean => {
@@ -93,6 +101,10 @@
           context.status.set(NOT_AVAILABLE_MESSAGE);
           return;
         }
+      }
+      if (context.large.isLarge(context.tabs.active()) && largeOf(id) === 'off') {
+        context.status.set(`${titleOf(id).replace(/\.{3}$/, '')} is not available for large files.`);
+        return;
       }
       if (typeof def.enabled === 'function' && !def.enabled(context)) {
         return;

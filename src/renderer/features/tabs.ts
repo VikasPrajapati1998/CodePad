@@ -188,7 +188,8 @@
       viewState: null,
       content: null,
     };
-    if (tab.kind === 'text' && tab.model) {
+    // A large tab's model is only a window of its file: neither its text nor its view state can be restored.
+    if (tab.kind === 'text' && tab.model && !app().large.isLarge(tab)) {
       entry.language = tab.model.getLanguageId();
       if (app().tabs.active() === tab) {
         entry.viewState = app().editor.saveViewState();
@@ -225,7 +226,7 @@
     if (!tab) {
       return;
     }
-    if (tab.kind === 'text' && entry.path && entry.content !== null && tab.model) {
+    if (tab.kind === 'text' && entry.path && entry.content !== null && tab.model && !app().large.isLarge(tab)) {
       tab.model.setValue(entry.content);
     }
     if (tab.persist && entry.persist) {
@@ -235,7 +236,7 @@
       tab.persist.bookmarks = entry.persist.bookmarks || [];
       app().tabs.changed();
     }
-    if (entry.viewState && tab.kind === 'text' && app().tabs.active() === tab) {
+    if (entry.viewState && tab.kind === 'text' && app().tabs.active() === tab && !app().large.isLarge(tab)) {
       app().editor.restoreViewState(entry.viewState);
     }
   }

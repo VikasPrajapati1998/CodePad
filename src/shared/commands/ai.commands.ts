@@ -4,22 +4,22 @@
 const commands: CommandEntry[] = [
   { id: 'ai.toggleSuggestions', title: 'AI Suggestions (Ghost Text)', menu: 'AI', order: 10, when: 'any', checkedSetting: 'ai.enabled' },
   { id: 'suggest.toggleDropdown', title: 'Word Suggestions While Typing', menu: 'AI', order: 20, when: 'any', checkedSetting: 'editor.autoSuggest' },
-  { id: 'ai.suggestNow', title: 'Suggest Now', menu: 'AI', order: 30, when: 'text' },
+  { id: 'ai.suggestNow', title: 'Suggest Now', menu: 'AI', order: 30, when: 'text', large: 'ok' },
 
   { id: 'ai.summarizeFile', title: 'Summarize Current File', menu: 'AI', order: 100, separatorBefore: true, accelerator: 'CmdOrCtrl+Shift+J', when: 'any' },
-  { id: 'ai.summarizeSelection', title: 'Summarize Selection', menu: 'AI', order: 110, when: 'text' },
+  { id: 'ai.summarizeSelection', title: 'Summarize Selection', menu: 'AI', order: 110, when: 'text', large: 'ok' },
   { id: 'ai.cancelSummary', title: 'Cancel Summary', menu: 'AI', order: 120, when: 'any' },
   { id: 'ai.clearSummaryCache', title: 'Clear Summary Cache', menu: 'AI', order: 140, when: 'any' },
 
-  { id: 'ai.checkGrammar', title: 'Check Grammar and Spelling with AI...', menu: 'AI', order: 145, separatorBefore: true, when: 'text' },
-  { id: 'grammar.checkOnline', title: 'Check Grammar Online (free LanguageTool)...', menu: 'AI', order: 145.5, when: 'text' },
-  { id: 'ai.rewrite', title: 'Rewrite / Restructure with AI...', menu: 'AI', order: 146, when: 'text' },
+  { id: 'ai.checkGrammar', title: 'Check Grammar and Spelling with AI...', menu: 'AI', order: 145, separatorBefore: true, when: 'text', large: 'ok' },
+  { id: 'grammar.checkOnline', title: 'Check Grammar Online (free LanguageTool)...', menu: 'AI', order: 145.5, when: 'text', large: 'ok' },
+  { id: 'ai.rewrite', title: 'Rewrite / Restructure with AI...', menu: 'AI', order: 146, when: 'text', large: 'ok' },
 
   { id: 'ai.chat', title: 'AI Chat Assistant...', menu: 'AI', order: 147, when: 'any' },
 
   // Version history of text tabs (renderer/features/versions.ts); listed under File, next to Reload from Disk.
-  { id: 'versions.save', title: 'Save Version...', menu: 'File', order: 58.5, separatorBefore: true, when: 'text' },
-  { id: 'versions.show', title: 'Version History...', menu: 'File', order: 58.6, when: 'text' },
+  { id: 'versions.save', title: 'Save Version...', menu: 'File', order: 58.5, separatorBefore: true, when: 'text', large: 'off' },
+  { id: 'versions.show', title: 'Version History...', menu: 'File', order: 58.6, when: 'text', large: 'off' },
 
   { id: 'ai.learning.toggle', title: 'Learn From My Usage', menu: 'AI', order: 148, separatorBefore: true, when: 'any', checkedSetting: 'ai.learning' },
   { id: 'ai.learning.manage', title: 'Manage Learned Data...', menu: 'AI', order: 149, when: 'any' },

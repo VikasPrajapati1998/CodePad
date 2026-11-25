@@ -23,6 +23,8 @@
 
   // Extensions Monaco has no language entry for, mapped to the closest one.
   const EXTRA_EXTENSIONS: Record<string, string> = {
+    '.jsonl': 'json',
+    '.ndjson': 'json',
     '.toml': 'ini',
     '.env': 'ini',
     '.vue': 'html',
@@ -90,6 +92,10 @@
   // previous run means that run died while parsing, so document tabs are not auto-restored this time.
   const RESTORE_MARKER_KEY = 'codepad.restoring';
 
+  // A large tab only holds one window of its file: language detection looks at the first 64 KiB of it.
+  const LARGE_SNIFF_CHARS = 65536;
+  const LARGE_SELECTION_MESSAGE = 'Select the text first (large files work on the selection).';
+
   const platform = /Win/i.test(navigator.platform) ? 'win32' : /Mac/i.test(navigator.platform) ? 'darwin' : 'linux';
 
   type MonacoNamespace = typeof window.monaco;
@@ -106,6 +112,8 @@
     autoDetect?: boolean;
     persist?: Partial<CodePadTabPersist>;
     diskStat?: CodePadDiskStat | null;
+    /** Set for a large file: `content` is its first window and the tab follows the large-file rules. */
+    large?: CodePadLargeState;
   }
 
   /** Options of createViewTab (a tab backed by an editor module). */
@@ -146,6 +154,8 @@
   let monaco!: MonacoNamespace;
   let editor!: monaco.editor.IStandaloneCodeEditor;
   let ctx: CodePadCtx | null = null;
+  // Assigned in init() right after the editor exists (it needs the editor); nothing reads it before that.
+  let largeCtl!: CodePadLargeController;
   let extensionMap = new Map<string, string>();
   let filenameMap = new Map<string, string>();
   let languageIds = new Set<string>();
@@ -173,6 +183,9 @@
   };
 
   const kindForPath = (p: string): CodePadDocumentKind | 'text' => KIND_BY_EXTENSION[extensionOf(p)] || 'text';
+
+  /** True for a text tab in large-file mode (its model is one window of the file). */
+  const isLargeTab = (tab: CodePadTab | null | undefined): tab is CodePadLargeTextTab => largeCtl.api.isLarge(tab);
 
   // File names reach the UI only through shown() (bidi/control characters removed, R-06).
   const shown = (name: string): string => CodePadSearchCore.displayName(name);
@@ -351,6 +364,30 @@
     ] },
   ];
 
+  /** True when the first lines (at least two, up to five) are each a complete JSON object or array: JSON Lines. */
+  function isJsonLines(text: string): boolean {
+    const lines = text.split(/\r?\n/, 6).filter((line) => line.trim() !== '');
+    if (lines.length < 2) {
+      return false;
+    }
+    // The last of six lines may be cut off by the sampled size, so only complete lines count.
+    const complete = lines.length > 5 ? lines.slice(0, 5) : lines.slice(0, text.length < SNIFF_MAX_CHARS ? lines.length : lines.length - 1);
+    return (
+      complete.length >= 2 &&
+      complete.every((line) => {
+        if (!/^[[{]/.test(line.trimStart())) {
+          return false;
+        }
+        try {
+          JSON.parse(line);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+  }
+
   /** Guesses a Monaco language id from text alone; 'plaintext' when nothing is convincing. */
   function sniffLanguage(content: string): string {
     const text = (content.length > SNIFF_MAX_CHARS ? content.slice(0, SNIFF_MAX_CHARS) : content).trimStart();
@@ -369,7 +406,10 @@
         JSON.parse(text);
         return 'json';
       } catch {
-        // Not JSON: fall through to the pattern scoring.
+        // Not one JSON document: it may still be JSON Lines (one document per line).
+        if (isJsonLines(text)) {
+          return 'json';
+        }
       }
     }
     const sample = text
@@ -589,6 +629,10 @@
   function activateTab(tab: CodePadTab): void {
     if (activeTab && activeTab.kind === 'text') {
       activeTab.viewState = editor.saveViewState();
+      if (isLargeTab(activeTab) && activeTab !== tab) {
+        // Leaving a large tab: hand its edits to main now (they stay in the model too).
+        void largeCtl.commit(activeTab);
+      }
     }
     activeTab = tab;
     if (tab.kind === 'text') {
@@ -605,6 +649,7 @@
       tab.view.layout();
       tab.view.focus();
     }
+    largeCtl.activate(isLargeTab(tab) ? tab : null);
     updateStatusForModel();
     highlightTreeFile();
     renderTabs();
@@ -656,11 +701,14 @@
     autoDetect,
     persist,
     diskStat = null,
+    large,
   }: TextTabOptions): CodePadTextTab {
     const model = monaco.editor.createModel(
       content,
-      typeof language === 'string' && languageIds.has(language) ? language : resolveLanguage(filePath, content),
-      filePath ? monaco.Uri.file(filePath) : undefined,
+      typeof language === 'string' && languageIds.has(language)
+        ? language
+        : resolveLanguage(filePath, large ? content.slice(0, LARGE_SNIFF_CHARS) : content),
+      large ? monaco.Uri.from({ scheme: 'cp-large', path: `/${large.handle}` }) : filePath ? monaco.Uri.file(filePath) : undefined,
     );
     const lineEnding = eol || (filePath ? detectEol(content) : defaultEol());
     if (!filePath) {
@@ -682,8 +730,13 @@
       // Read Mode is the default of a file opened from disk; untitled and empty files start in Edit Mode.
       persist: newPersist({ readOnly: filePath !== null && content !== '', ...persist }),
       diskStat,
+      large: large ?? null,
     };
     model.onDidChangeContent((event) => {
+      if (isLargeTab(tab)) {
+        largeCtl.modelChanged(tab, event);
+        return;
+      }
       // Keep tab.eol in step with the model; a lone-CR tab stays 'cr' until the user picks LF or CRLF.
       if (event.eol === '\r\n' && tab.eol !== 'crlf') {
         tab.eol = 'crlf';
@@ -699,6 +752,9 @@
       }
       scheduleSessionSave();
     });
+    if (isLargeTab(tab)) {
+      largeCtl.initTab(tab);
+    }
     tabs.push(tab);
     bus.emit('tab:created', tab);
     return tab;
@@ -861,6 +917,9 @@
     }
     if (tab.kind === 'text') {
       clearTimeout(tab.detectTimer ?? undefined);
+      if (isLargeTab(tab)) {
+        largeCtl.close(tab);
+      }
       tab.model.dispose();
     } else {
       try {
@@ -928,6 +987,10 @@
     if (tab.kind !== 'text' || typeof line !== 'number' || !Number.isInteger(line) || line < 1) {
       return;
     }
+    if (isLargeTab(tab)) {
+      void largeCtl.goToLine(tab, line, Number.isInteger(col) ? Math.max(1, col) : 1, Math.max(0, length));
+      return;
+    }
     const lineNumber = Math.min(line, tab.model.getLineCount());
     const column = Math.max(1, Number.isInteger(col) ? col : 1);
     const range = new monaco.Range(lineNumber, column, lineNumber, column + Math.max(0, length));
@@ -986,8 +1049,7 @@
         return null;
       }
       if (result.tooLarge) {
-        setStatus(`${baseName(filePath)} is larger than 20 MB and cannot be opened.`);
-        return null;
+        return await openLargePath(filePath, { line, col });
       }
       const tab = addTab(textTabOptions(filePath, result));
       setStatus(
@@ -1001,6 +1063,45 @@
       setStatus(`Could not open ${baseName(filePath)}: ${errorMessage(error)}`);
       return null;
     }
+  }
+
+  /** Tab options of a file opened in large-file mode: the first window as content, always in Read Mode. */
+  function largeTabOptions(filePath: string, opened: CpLargeOpenOk): TextTabOptions {
+    return {
+      filePath,
+      content: opened.window.text,
+      encoding: opened.encoding,
+      eol: opened.eol,
+      persist: { readOnly: true },
+      diskStat: { mtimeMs: opened.mtimeMs, size: opened.size },
+      large: largeCtl.createState(opened),
+    };
+  }
+
+  /** Opens a file over the full-load size in large-file mode (main keeps the file, the tab shows one window). */
+  async function openLargePath(
+    filePath: string,
+    { line, col }: { line?: number; col?: number } = {},
+  ): Promise<CodePadTextTab | null> {
+    const opened = await largeCtl.open(filePath);
+    if (!opened.ok) {
+      setStatus(
+        opened.code === 'binary'
+          ? `${baseName(filePath)} is a binary file and cannot be opened.`
+          : opened.code === 'limit'
+            ? 'Close a large file first (8 open).'
+            : `Could not open ${baseName(filePath)}: ${opened.message}`,
+      );
+      return null;
+    }
+    const tab = addTab(largeTabOptions(filePath, opened));
+    setStatus(
+      opened.replaced
+        ? `${baseName(filePath)} contains characters that are not valid ${encodingLabel(opened.encoding)}: try Encoding > Reopen with Encoding.`
+        : `${tab.name} is a large file: only part of it is loaded at a time. Opened in Read Mode.`,
+    );
+    revealInTab(tab, line, col);
+    return tab;
   }
 
   async function openViewPath(kind: CodePadDocumentKind, filePath: string): Promise<CodePadDocumentTab | null> {
@@ -1071,8 +1172,18 @@
       if (tab.kind !== 'text') {
         return await reloadViewTab(tab, tab.path);
       }
+      if (isLargeTab(tab)) {
+        const reloaded = await largeCtl.reload(tab, { encoding });
+        if (reloaded) {
+          bus.emit('tab:reloaded', tab);
+        }
+        return reloaded;
+      }
       const result = await api.readFile(tab.path, { encoding: encoding || tab.encoding });
-      if (result.binary || result.tooLarge) {
+      if (result.tooLarge) {
+        return await replaceWithLarge(tab, tab.path, encoding);
+      }
+      if (result.binary) {
         setStatus(`${tab.name} can no longer be opened as text.`);
         return false;
       }
@@ -1097,6 +1208,30 @@
       setStatus(`Could not reload ${tab.name}: ${errorMessage(error)}`);
       return false;
     }
+  }
+
+  /** A text tab whose file grew past the full-load size becomes a large tab at the same place in the tab bar. */
+  async function replaceWithLarge(tab: CodePadTextTab, filePath: string, encoding?: string): Promise<boolean> {
+    const opened = await largeCtl.open(filePath, encoding ? { encoding } : undefined);
+    if (!opened.ok) {
+      setStatus(`Could not reload ${tab.name}: ${opened.message}`);
+      return false;
+    }
+    const wasActive = tab === activeTab;
+    const index = tabs.indexOf(tab);
+    const cursor = wasActive ? editor.getPosition() : null;
+    const fresh = createTab({ ...largeTabOptions(filePath, opened), persist: { ...tab.persist, bookmarks: [], readOnly: true } });
+    tabs.splice(tabs.indexOf(fresh), 1);
+    tabs.splice(index, 0, fresh);
+    if (wasActive) {
+      activateTab(fresh);
+    }
+    removeTab(tab);
+    bus.emit('tab:reloaded', fresh);
+    if (cursor && isLargeTab(fresh)) {
+      await largeCtl.goToLine(fresh, cursor.lineNumber);
+    }
+    return true;
   }
 
   /** Document tabs are re-created from the file's bytes, keeping their position. */
@@ -1221,7 +1356,7 @@
       if (!tab.path) {
         return saveTabAs(tab);
       }
-      ok = await writeTab(tab, tab.path);
+      ok = isLargeTab(tab) ? await largeCtl.save(tab) : await writeTab(tab, tab.path);
     }
     renderTabs();
     if (ok) {
@@ -1274,7 +1409,8 @@
     if (!filePath) {
       return false;
     }
-    if (!(await writeTab(tab, filePath))) {
+    const written = isLargeTab(tab) ? await largeCtl.saveAs(tab, filePath) : await writeTab(tab, filePath);
+    if (!written) {
       return false;
     }
     tab.autoDetect = false;
@@ -1326,6 +1462,27 @@
         pinned: tab.persist.pinned,
         color: tab.persist.color,
         readOnly: tab.persist.readOnly,
+        active: tab === activeTab,
+      };
+    }
+    if (isLargeTab(tab)) {
+      // A large tab is restored from its file, position and mode; unsaved large edits are never stored (quitting asks).
+      return {
+        kind: 'text',
+        path: tab.path,
+        name: tab.name,
+        encoding: tab.encoding,
+        eol: tab.eol,
+        language: tab.model.getLanguageId(),
+        autoDetect: false,
+        content: null,
+        viewState: null,
+        large: await largeCtl.position(tab),
+        pinned: tab.persist.pinned,
+        color: tab.persist.color,
+        readOnly: tab.persist.readOnly,
+        monitor: tab.persist.monitor,
+        bookmarks: [],
         active: tab === activeTab,
       };
     }
@@ -1449,6 +1606,33 @@
     }
   }
 
+  /** Rebuilds a large tab from its file (and its saved position); null when the file is gone. */
+  async function restoreLargeTab(
+    saved: CpSessionTab,
+    filePath: string,
+    position: CodePadLargePosition | null,
+  ): Promise<CodePadTextTab | null> {
+    const forced = saved.encoding && !AUTO_DETECTED_ENCODINGS.has(saved.encoding) ? { encoding: saved.encoding } : undefined;
+    let opened: CpLargeResult<CpLargeOpenOk>;
+    try {
+      opened = await largeCtl.open(filePath, forced);
+    } catch {
+      // Missing or unreadable: the tab is dropped like any other whose file is gone.
+      return null;
+    }
+    if (!opened.ok) {
+      if (opened.code === 'limit') {
+        throw new Error('too many large files are open.');
+      }
+      return null;
+    }
+    const tab = createTab({ ...largeTabOptions(filePath, opened), language: saved.language });
+    if (isLargeTab(tab) && position) {
+      await largeCtl.restorePosition(tab, position);
+    }
+    return tab;
+  }
+
   /** Rebuilds one saved tab; returns null when its file is gone and there is no unsaved text to keep. */
   async function restoreTab(saved: CpSessionTab, notes: string[]): Promise<SessionTab | null> {
     if (saved.kind !== 'text') {
@@ -1464,15 +1648,25 @@
         autoDetect: saved.autoDetect,
       });
     }
+    if (saved.large) {
+      return restoreLargeTab(saved, saved.path, saved.large);
+    }
     let disk: CpReadTextOk | null = null;
+    let grewLarge = false;
     try {
       const forced = saved.encoding && !AUTO_DETECTED_ENCODINGS.has(saved.encoding) ? { encoding: saved.encoding } : undefined;
       const result = await api.readFile(saved.path, forced);
-      if (!result.binary && !result.tooLarge) {
+      if (result.tooLarge) {
+        grewLarge = true;
+      } else if (!result.binary) {
         disk = result;
       }
     } catch {
       // Missing or unreadable: fall back to the saved unsaved text, if any.
+    }
+    if (grewLarge) {
+      // The file passed the full-load size since the session was saved: reopen it in large-file mode.
+      return restoreLargeTab(saved, saved.path, null);
     }
     if (!disk && saved.content === null) {
       return null;
@@ -1578,8 +1772,9 @@
     let toConfirm: CodePadTab[];
     try {
       await persistSession();
-      // Unsaved document edits that could not be stored would be lost, so those tabs still ask.
-      toConfirm = tabs.filter((item) => item.kind !== 'text' && item.stateLost);
+      // Unsaved document edits that could not be stored would be lost, so those tabs still ask; so does every
+      // large tab with unsaved edits (they are never stored in the session).
+      toConfirm = tabs.filter((item) => (item.kind !== 'text' && item.stateLost) || (isLargeTab(item) && item.dirty));
     } catch (error) {
       // The session could not be stored, so fall back to asking about unsaved changes.
       setStatus(`Could not save the session: ${errorMessage(error)}`);
@@ -1759,7 +1954,9 @@
     }
     const position = editor.getPosition();
     if (position) {
-      els.pos.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
+      els.pos.textContent = isLargeTab(activeTab)
+        ? largeCtl.positionLabel(activeTab, position)
+        : `Ln ${position.lineNumber}, Col ${position.column}`;
     }
   }
 
@@ -1810,6 +2007,10 @@
     const entry = schema.SCHEMA[key];
     if (editor && entry && entry.monaco) {
       editor.updateOptions(nestOption(entry.monaco, monacoValue(entry, value)) as monaco.editor.IEditorOptions);
+      if (isLargeTab(activeTab)) {
+        // The large-tab overrides (no wrap, no minimap...) win over the setting that just changed.
+        largeCtl.applyOptions();
+      }
     }
     if (key === 'ui.theme' && editor) {
       applyTheme();
@@ -1866,7 +2067,21 @@
       }
       return;
     }
+    if (isLargeTab(activeTab)) {
+      // A large tab searches through the find bar of renderer/features/large-find.ts (window first, then the file).
+      void commandRegistry.execute('large.find');
+      return;
+    }
     runEditorAction('actions.find');
+  }
+
+  /** Runs a large-file command's work on the active tab; any other tab gets a status message. */
+  async function withLargeTab(work: (tab: CodePadLargeTextTab) => Promise<unknown>): Promise<void> {
+    if (isLargeTab(activeTab)) {
+      await work(activeTab);
+      return;
+    }
+    setStatus('Only for large files.');
   }
 
   // ---------- Core commands ----------
@@ -1884,9 +2099,13 @@
       'file.saveAll': saveAll,
       'tabs.close': () => activeTab && closeTabFromUi(activeTab),
       'edit.palette': () => runEditorAction('editor.action.quickCommand'),
-      'edit.gotoLine': () => runEditorAction('editor.action.gotoLine'),
+      'edit.gotoLine': () => (isLargeTab(activeTab) ? largeCtl.promptGoToLine(activeTab) : runEditorAction('editor.action.gotoLine')),
       'edit.find': findInActiveTab,
-      'edit.replace': () => runEditorAction('editor.action.startFindReplace'),
+      'edit.replace': () =>
+        isLargeTab(activeTab) ? commandRegistry.execute('large.find', { replace: true }) : runEditorAction('editor.action.startFindReplace'),
+      'large.goToStart': () => withLargeTab((tab) => largeCtl.api.goTo(tab, 'start')),
+      'large.goToEnd': () => withLargeTab((tab) => largeCtl.api.goTo(tab, 'end')),
+      'large.goToPercent': () => withLargeTab((tab) => largeCtl.promptGoToPercent(tab)),
       'view.toggleSidebar': () => toggleSetting('ui.sidebar'),
       'view.toggleMinimap': () => toggleSetting('ui.minimap'),
       'view.toggleWordWrap': () => toggleSetting('editor.wordWrap'),
@@ -2014,7 +2233,8 @@
   function rangesForScope(scope: CodePadTextScope, model: monaco.editor.ITextModel): monaco.Range[] {
     const selections = (editor.getSelections() || []).map((selection) => monaco.Range.lift(selection));
     const filled = selections.filter((range) => !range.isEmpty());
-    const full = model.getFullModelRange();
+    // A large tab holds one window only: scopes that would fall back to "the whole document" need a selection there.
+    const wholeDocument = isLargeTab(activeTab) ? [] : [model.getFullModelRange()];
     const wholeLines = (range: monaco.Range): monaco.Range => {
       const endLine = range.endColumn === 1 && range.endLineNumber > range.startLineNumber ? range.endLineNumber - 1 : range.endLineNumber;
       return new monaco.Range(range.startLineNumber, 1, endLine, model.getLineMaxColumn(endLine));
@@ -2025,7 +2245,7 @@
       case 'lines':
         return (filled.length > 0 ? filled : selections).map(wholeLines);
       case 'document':
-        return [full];
+        return wholeDocument;
       case 'wordOrSelection': {
         if (filled.length > 0) {
           return filled;
@@ -2035,9 +2255,9 @@
         return position && word ? [new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)] : [];
       }
       case 'selectionOrDocument':
-        return filled.length > 0 ? filled : [full];
+        return filled.length > 0 ? filled : wholeDocument;
       case 'linesOrDocument':
-        return filled.length > 0 ? filled.map(wholeLines) : [full];
+        return filled.length > 0 ? filled.map(wholeLines) : wholeDocument;
       default:
         throw new Error(`Unknown text scope: ${scope}`);
     }
@@ -2055,7 +2275,7 @@
     const model = tab.model;
     const ranges = disjointRanges(rangesForScope(scope, model));
     if (ranges.length === 0) {
-      setStatus(scope === 'wordOrSelection' ? 'Nothing to convert.' : 'Nothing selected.');
+      setStatus(isLargeTab(tab) ? LARGE_SELECTION_MESSAGE : scope === 'wordOrSelection' ? 'Nothing to convert.' : 'Nothing selected.');
       return false;
     }
     const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
@@ -2105,6 +2325,10 @@
       return null;
     }
     const selections = (editor.getSelections() || []).filter((selection) => !selection.isEmpty());
+    if (selections.length === 0 && isLargeTab(tab)) {
+      setStatus(LARGE_SELECTION_MESSAGE);
+      return null;
+    }
     return selections.length > 0
       ? { tab, model: tab.model, ranges: selections.map((selection) => monaco.Range.lift(selection)), isSelection: true }
       : { tab, model: tab.model, ranges: [tab.model.getFullModelRange()], isSelection: false };
@@ -2229,6 +2453,7 @@
         restore: restoreSnapshot,
       }),
       app: Object.freeze({ version: appVersion, platform, baseName, extensionOf }),
+      large: largeCtl.api,
     };
     return Object.freeze(context);
   }
@@ -2309,6 +2534,25 @@
     });
 
     buildLanguageIndex();
+    largeCtl = window.CodePadLargeTabs.create({
+      api,
+      monaco,
+      getEditor: () => editor,
+      scrollHost: byId('large-scroll'),
+      editorHost: els.editor,
+      settings: appSettings,
+      ui,
+      bus,
+      getActive: () => activeTab,
+      setStatus,
+      addStatusItem,
+      markDirty,
+      refreshStatus: updateStatusForModel,
+      settingsOptions: settingsEditorOptions,
+      openText,
+      baseName,
+      encodingLabel,
+    });
     ctx = buildContext();
     registerCoreCommands();
     commandRegistry.internal.bindContext(ctx);
@@ -2320,6 +2564,10 @@
     bus.emit('editor:created', editor);
 
     const failed = window.CodePadFeatures.initAll(ctx);
+    // Subscribed after the features so these run last: Read/Edit Mode handlers set Monaco's readOnly from the tab's
+    // mode alone, and a large tab's window may be view-only whatever the mode.
+    bus.on('tab:activated', () => largeCtl.applyOptions());
+    bus.on('tab:modeChanged', (tab) => largeCtl.modeChanged(tab));
     applyTheme();
     if (failed.length > 0) {
       setStatus(`Some features could not start: ${failed.join(', ')}.`);

@@ -166,7 +166,17 @@
         && tab.kind === 'text'
         && tab.persist.readOnly
         && !tab.model.isDisposed()
-        && tab.model.getLanguageId() === 'markdown';
+        && tab.model.getLanguageId() === 'markdown'
+        && !ctx.large.isLarge(tab);
+
+      /** Large Markdown tabs are never rendered; the note is shown once per tab. */
+      const largeNoted = new WeakSet<CodePadTab>();
+      function noteLarge(tab: CodePadTab | null): void {
+        if (tab !== null && tab.kind === 'text' && tab.persist.readOnly && ctx.large.isLarge(tab) && !largeNoted.has(tab) && tab.model.getLanguageId() === 'markdown') {
+          largeNoted.add(tab);
+          ctx.status.set('Markdown preview is off for large files.');
+        }
+      }
 
       function render(tab: CodePadTextTab, scrollTop: number): void {
         const source = tab.model.getValue();
@@ -188,6 +198,7 @@
         if (shown && shown !== tab) {
           scrolls.set(shown, preview.scrollTop);
         }
+        noteLarge(tab);
         if (wanted(tab)) {
           render(tab, shown === tab ? preview.scrollTop : (scrolls.get(tab) ?? 0));
           shown = tab;

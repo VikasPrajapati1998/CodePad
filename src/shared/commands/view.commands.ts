@@ -35,7 +35,7 @@ const commands: CommandEntry[] = [
   // Panels live in a submenu so the View menu stays short enough to open below the menu bar.
   { id: 'view.showExplorer', title: 'Show Explorer', menu: 'View/Panels', order: 100, accelerator: 'CmdOrCtrl+Shift+E', when: 'any' },
   { id: 'view.showDocuments', title: 'Show Documents', menu: 'View/Panels', order: 110, accelerator: 'CmdOrCtrl+Shift+D', when: 'any' },
-  { id: 'view.outline', title: 'Outline', menu: 'View/Panels', order: 120, accelerator: 'CmdOrCtrl+Shift+Y', when: 'any' },
+  { id: 'view.outline', title: 'Outline', menu: 'View/Panels', order: 120, accelerator: 'CmdOrCtrl+Shift+Y', when: 'any', large: 'off' },
   { id: 'view.toggleBottomPanel', title: 'Toggle Bottom Panel', menu: 'View/Panels', order: 130, accelerator: 'CmdOrCtrl+J', when: 'any' },
   { id: 'view.summary', title: 'Summary...', menu: 'View/Panels', order: 140, separatorBefore: true },
   { id: 'view.zen', title: 'Distraction Free Mode', menu: 'View', order: 150, separatorBefore: true, accelerator: 'CmdOrCtrl+Shift+F11', when: 'any' },
@@ -48,11 +48,11 @@ const commands: CommandEntry[] = [
   { id: 'settings.open', title: 'Settings...', menu: 'File', order: 900, separatorBefore: true, accelerator: 'CmdOrCtrl+,', when: 'any' },
 
   { id: 'enc.reopenWith', title: 'Reopen with Encoding...', menu: 'Encoding', order: 10 },
-  { id: 'enc.convertTo', title: 'Convert to Encoding...', menu: 'Encoding', order: 20 },
+  { id: 'enc.convertTo', title: 'Convert to Encoding...', menu: 'Encoding', order: 20, large: 'off' },
   { id: 'enc.setDefault', title: 'Set Default Encoding...', menu: 'Encoding', order: 30, when: 'any' },
-  { id: 'enc.eolLf', title: 'Convert to LF (Unix)', menu: 'Encoding/End of Line', order: 10 },
-  { id: 'enc.eolCrlf', title: 'Convert to CRLF (Windows)', menu: 'Encoding/End of Line', order: 20 },
-  { id: 'enc.eolCr', title: 'Convert to CR (Classic Mac)', menu: 'Encoding/End of Line', order: 30 }
+  { id: 'enc.eolLf', title: 'Convert to LF (Unix)', menu: 'Encoding/End of Line', order: 10, large: 'off' },
+  { id: 'enc.eolCrlf', title: 'Convert to CRLF (Windows)', menu: 'Encoding/End of Line', order: 20, large: 'off' },
+  { id: 'enc.eolCr', title: 'Convert to CR (Classic Mac)', menu: 'Encoding/End of Line', order: 30, large: 'off' }
 ];
 
 export = commands;

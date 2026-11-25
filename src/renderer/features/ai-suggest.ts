@@ -94,7 +94,8 @@
     if (selections.length !== 1 || !selections[0].isEmpty()) {
       return null;
     }
-    if (model.getValueLength() > MAX_MODEL_CHARS || model.getLineLength(position.lineNumber) > MAX_LINE_CHARS) {
+    // A large tab's model is only a window (context comes from it, never from the file start), so its size does not matter.
+    if ((model.getValueLength() > MAX_MODEL_CHARS && !app().large.isLarge(tab)) || model.getLineLength(position.lineNumber) > MAX_LINE_CHARS) {
       return null;
     }
     const line = model.getLineContent(position.lineNumber);

@@ -20,7 +20,8 @@
    * @param label What the version is ("Before AI: shorten", "Before restore", a name the user typed).
    */
   function snapshot(tab: CodePadTextTab, label: string): void {
-    if (tab.model.isDisposed()) {
+    // A large tab's model is only one window of the file: there is nothing meaningful to snapshot.
+    if (tab.large !== null || tab.model.isDisposed()) {
       return;
     }
     const text = lfText(tab.model);
